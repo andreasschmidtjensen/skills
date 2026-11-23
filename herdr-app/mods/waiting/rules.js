@@ -46,6 +46,7 @@ const spaceOf = (term) => term.labels?.["herdr.space"] ?? "";
 // Contract: the mod supplies cpu with every sample (read with ps); terminals() has none. Without cpu, needs-input never fires.
 export const track = (prev, term, now, sample = null) => {
   if (!isPlain(term)) return { ignored: true };
+  const fresh = !prev || prev.ignored; // first time this terminal is tracked
   const m = { ...(prev && !prev.ignored ? prev : {}) };
   delete m.ignored;
   if (term.state === "finished") {
@@ -63,11 +64,13 @@ export const track = (prev, term, now, sample = null) => {
     return m;
   }
   const name = term.foreground?.name ?? "";
-  if (!m.fg) { m.fg = { name, since: now }; m.sig = null; m.sigSince = null; m.needs = null; m.sampleAt = null; }
+  // A program already running when tracking began (a REPL or pager left open) takes its first
+  // screen as the quiet baseline; one started while tracked has none, so a prompt it shows at once counts.
+  if (!m.fg) { m.fg = { name, since: now, preexisting: fresh }; m.sig = null; m.sigSince = null; m.needs = null; m.sampleAt = null; m.quietSig = null; }
   else if (name) m.fg = { ...m.fg, name };
   if (sample && sample.sig != null) {
+    if (m.quietSig == null && m.fg.preexisting && m.sampleAt == null) m.quietSig = sample.sig;
     m.sampleAt = now;
-    if (m.quietSig == null) m.quietSig = sample.sig; // baseline: what was on screen when tracking began
     if (sample.sig !== m.sig) { m.sig = sample.sig; m.sigSince = now; m.needs = null; }
     m.cpu = sample.cpu ?? null;
     m.line = sample.line ?? "";

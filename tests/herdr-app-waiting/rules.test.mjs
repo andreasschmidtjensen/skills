@@ -205,3 +205,20 @@ test("needsScreen: only non-shell foreground that may be quiet", () => {
   assert.equal(needsScreen(busy({ status: "idle" }), {}, t0), false);
   assert.equal(needsScreen(busy({ labels: {} }), {}, t0), false);
 });
+
+test("a program started while tracked that shows a prompt at once needs input (live bug)", () => {
+  const base = { address: "t9", state: "live", status: null, labels: { "herdr.space": "s1" } };
+  const shell = { ...base, foreground: { name: "zsh", pid: 1 }, program: { shell: true, agent: false } };
+  const py = { ...base, foreground: { name: "python3", pid: 2 }, program: { shell: false, agent: false } };
+  let m = track(undefined, shell, 0);
+  m = track(m, py, 1000, { sig: "P", cpu: 0, line: "Continue? [y/N]" });
+  m = track(m, py, 7000, { sig: "P", cpu: 0, line: "Continue? [y/N]" });
+  assert.ok(m.needs, "flagged");
+});
+
+test("a REPL already open when tracking began stays quiet", () => {
+  const py = { address: "t8", state: "live", status: null, labels: { "herdr.space": "s1" }, foreground: { name: "python3", pid: 2 }, program: { shell: false, agent: false } };
+  let m = track(undefined, py, 0, { sig: "R", cpu: 0, line: ">>>" });
+  m = track(m, py, 60000, { sig: "R", cpu: 0, line: ">>>" });
+  assert.equal(m.needs ?? null, null);
+});
