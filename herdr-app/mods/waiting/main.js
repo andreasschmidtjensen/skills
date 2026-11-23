@@ -1,31 +1,33 @@
 // The waiting mod: plain (non-agent) terminals that wait on you, across spaces.
 // props().role picks the view:
-//   "badge"            one row "Waiting · n" for the sidebar; a click opens the picker. Polls and hears the keys' commands.
+//   "list"             a sidebar block: header "Terminals · n waiting" (a click opens the picker) and every live plain terminal
+//                      below it, grouped by space, waiting ones marked; a click on a row focuses it. Polls and hears the keys' commands.
+//   "badge"            the older one-row "Waiting · n" for layouts that still have it; a click opens the picker. Same polling.
 //   "picker" (overlay) the list, grouped by space; ↑/↓ and Enter focus, Esc closes. An overlay copy with no role is the picker.
 // Keys (keys.json): "cmd-shift-j": "mod.open:waiting" opens the picker (mod.json's popup; needs no listener),
 // "cmd-j": "waiting.next" focuses the next waiting terminal. A "waiting.picker" command also toggles the list.
 // Known limit: "waiting.<command>" reaches shown copies only (AGENTS.md), so "next" needs the badge (or the picker) on screen:
-// with the sidebar collapsed or a layout without the badge block it does nothing.
-// Every copy tries to poll, but only one holds the shared lock (the picker polls too, so it is fresh without the badge); it publishes the list as shared "waiting.list" and the count as "waiting.count",
+// with the sidebar collapsed or a layout without the list (or badge) block it does nothing.
+// Every copy tries to poll, but only one holds the shared lock (the picker polls too, so it is fresh without the badge); it publishes the waiting list as shared "waiting.list", every terminal for the list block as "waiting.all" and the count as "waiting.count",
 // each only when it changes.
 // Rules live in rules.js, the pure view/command helpers in view.js.
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { exec, terminals, spaces, panes, focused, run, theme, props, nextCommand, openOverlay, closeOverlay, shared, setShared } from "herdr";
-import { isPlain, isShell, parsePs, needsScreen, track, markSeen, waitingList, count, screenSig, lastLine } from "./rules.js";
-import { POLL_MS, rowParts, groupBySpace, pickNext, moveAt, lockHeld, whereIs } from "./view.js";
+import { isPlain, isShell, parsePsArgs, needsScreen, track, markSeen, waitingList, allRows, count, screenSig, lastLine } from "./rules.js";
+import { POLL_MS, rowParts, listHeader, listRow, groupBySpace, pickNext, moveAt, lockHeld, whereIs } from "./view.js";
 
-const LIST = "waiting.list", COUNT = "waiting.count", LOCK = "waiting.lock", POPUP = "waiting.popup";
+const LIST = "waiting.list", ALL = "waiting.all", COUNT = "waiting.count", LOCK = "waiting.lock", POPUP = "waiting.popup";
 // Module scope is shared by every copy, so per-copy state (the lock id, the "polling" flag) lives on the view (init).
 // MEM is deliberately module-scoped: whichever copy holds the lock reads and writes the one memory, so a
 // hand-over keeps the marks. A reload of the mod's source starts it empty: marks raised so far are lost.
 let MEM = {}; // address -> rules.js memory
-let LAST = ""; // the published list as JSON, to write shared state only when it changes
+let LAST = "", LAST_ALL = ""; // the published lists as JSON, to write shared state only when they change
 
 const machineOf = (t) => (String(t.address).includes("/") ? String(t.address).split("/")[0] : null);
 
-// One ps per machine for all candidate pids: address -> cpu %. A pid ps does not know simply has no entry.
+// One ps per machine for all candidate pids: address -> { cpu %, args }. A pid ps does not know simply has no entry.
 async function cpuOf(terms) {
   const byMachine = new Map();
   for (const t of terms) {
@@ -37,10 +39,10 @@ async function cpuOf(terms) {
   const out = new Map();
   await Promise.all([...byMachine].map(async ([k, ts]) => {
     // The foreground pid belongs to the terminal's machine: look it up there, not here.
-    const ps = await exec("ps", ["-o", "pid=,%cpu=", "-p", ts.map((t) => t.foreground.pid).join(",")], k ? { on: k } : undefined).catch(() => null);
+    const ps = await exec("ps", ["-o", "pid=,%cpu=,args=", "-p", ts.map((t) => t.foreground.pid).join(",")], k ? { on: k } : undefined).catch(() => null);
     if (!ps) return; // ps exits 1 when some pid is gone but still prints the others
-    const cpus = parsePs(ps.stdout);
-    for (const t of ts) if (cpus.has(Number(t.foreground.pid))) out.set(t.address, cpus.get(Number(t.foreground.pid)));
+    const info = parsePsArgs(ps.stdout);
+    for (const t of ts) if (info.has(Number(t.foreground.pid))) out.set(t.address, info.get(Number(t.foreground.pid)));
   }));
   return out;
 }
@@ -60,10 +62,11 @@ async function pollOnce() {
   const cpus = await cpuOf(cands);
   const samples = new Map();
   await Promise.all(cands.map(async (t) => {
-    const cpu = cpus.get(t.address) ?? null;
-    if (!needsScreen(t, MEM, now, cpu)) { if (cpu != null) samples.set(t.address, { cpu }); return; }
+    const info = cpus.get(t.address);
+    const cpu = info?.cpu ?? null, args = info?.args ?? null;
+    if (!needsScreen(t, MEM, now, cpu, args)) { if (cpu != null) samples.set(t.address, { cpu, args }); return; }
     const s = await screenOf(t);
-    samples.set(t.address, s ? { ...s, cpu } : cpu != null ? { cpu } : null);
+    samples.set(t.address, s ? { ...s, cpu, args } : cpu != null ? { cpu, args } : null);
   }));
   const next = {};
   for (const t of plain) next[t.address] = track(MEM[t.address], t, now, samples.get(t.address) ?? null);
@@ -71,11 +74,13 @@ async function pollOnce() {
   const f = focused();
   if (f?.terminal) MEM = markSeen(MEM, f.terminal, now);
   const ss = spaces();
-  const spaceNames = {}, tabNames = {};
-  for (const sp of ss) { spaceNames[sp.id] = sp.name; for (const tb of sp.tabs ?? []) tabNames[tb.id] = tb.name; }
-  const list = waitingList(MEM, all, {
-    currentSpace: f?.space ?? null, spaceOrder: ss.map((s) => s.id), spaceNames, tabNames, focused: f?.terminal ?? null, now,
-  });
+  const spaceNames = {}, tabNames = {}, tabOrder = [];
+  for (const sp of ss) { spaceNames[sp.id] = sp.name; for (const tb of sp.tabs ?? []) { tabNames[tb.id] = tb.name; tabOrder.push(tb.id); } }
+  const opts = { currentSpace: f?.space ?? null, spaceOrder: ss.map((s) => s.id), tabOrder, spaceNames, tabNames, now };
+  const list = waitingList(MEM, all, { ...opts, focused: f?.terminal ?? null });
+  const rows = allRows(MEM, all, opts);
+  const allJson = JSON.stringify(rows);
+  if (allJson !== LAST_ALL) { LAST_ALL = allJson; setShared(ALL, { rows }); }
   // Shared state is persisted and re-renders every mod: write it only when it changed.
   const json = JSON.stringify(list);
   if (json !== LAST) { LAST = json; setShared(LIST, { list }); }
@@ -98,6 +103,7 @@ async function poll(st) {
 }
 
 const published = () => shared(LIST)?.list ?? [];
+const publishedAll = () => shared(ALL)?.rows ?? [];
 
 // Shows the terminal: its space and tab first, then its pane. A parked one (no pane) is kept as a tab first.
 function focusTerminal(address) {
@@ -174,6 +180,31 @@ export default class Waiting extends View {
       .child(div().flex_1().child(`Waiting · ${n}`));
   }
 
+  renderList(t) {
+    const n = shared(COUNT) ?? 0, h = listHeader(n);
+    const here = focused()?.terminal ?? null;
+    const kids = [];
+    for (const g of groupBySpace(publishedAll())) {
+      kids.push(div().px(12).pt(6).pb(2).text_size(11).text_color(t.dim).truncate().child(g.name || "—"));
+      for (const e of g.rows) {
+        const p = listRow(e), tone = p.dim ? t.dim : p.tone ? t[p.tone] ?? t.foreground : t.foreground;
+        kids.push(h_flex().id(`wl-${e.address}`).mx(4).px(8).h(24).rounded(6).gap(6).items_center().text_size(12).cursor_pointer()
+          .when(e.address === here, (el) => el.bg(t.hover)).hover((s) => s.bg(t.hover))
+          .on_click(() => focusTerminal(e.address))
+          .child(div().w(12).flex_none().text_color(tone).child(p.mark))
+          .child(div().max_w(90).flex_none().truncate().text_color(p.dim ? t.dim : t.foreground).child(p.program))
+          .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(p.tab))
+          .child(div().max_w(70).flex_none().truncate().text_size(11).text_color(t.dim).child(p.cwd)));
+      }
+    }
+    return v_flex().id("waiting-block").size_full().min_h(0)
+      .child(h_flex().id("waiting-head").px(12).h(28).flex_none().items_center().text_size(12).cursor_pointer()
+        .text_color(h.dim ? t.dim : t.foreground).hover((s) => s.bg(t.hover))
+        .on_click(() => togglePicker())
+        .child(div().flex_1().child(h.text)))
+      .child(v_flex().id("waiting-all").flex_1().min_h(0).overflow_y_scrollbar().mode("always").children(kids));
+  }
+
   renderRow(t, e, on, now) {
     const p = rowParts(e, now);
     const tone = p.dim ? t.dim : t[p.tone] ?? t.foreground;
@@ -189,6 +220,7 @@ export default class Waiting extends View {
 
   render() {
     const t = theme();
+    if (this.role === "list") return this.renderList(t);
     if (this.role !== "picker") return this.renderBadge(t);
     const now = Date.now();
     const list = published();

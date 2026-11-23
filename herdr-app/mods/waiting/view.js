@@ -62,3 +62,13 @@ export const whereIs = (address, panes, spaces) => {
   const space = (spaces ?? []).find((s) => s.tabs?.some((t) => t.id === p.tab));
   return { pane: p.pane, tab: p.tab, space: space?.id ?? null };
 };
+
+// The list block's header: "Terminals · n waiting", dim when n is 0.
+export const listHeader = (n) => ({ text: `Terminals · ${n} waiting`, dim: !n });
+
+// One list row from an allRows entry: the mark (none for running/idle), program, tab, cwd tail.
+const MARKS = { "needs-input": { mark: "!", tone: "blocked" }, finished: { mark: "✓", tone: "done" }, exited: { mark: "✕", tone: "blocked" }, quiet: { mark: "·", tone: "dim" } };
+export const listRow = (e) => {
+  const k = MARKS[e.kind];
+  return { mark: k?.mark ?? "", tone: k?.tone ?? null, dim: e.kind === "quiet", program: e.program || e.address, tab: e.tabName || "", cwd: e.cwd || "" };
+};

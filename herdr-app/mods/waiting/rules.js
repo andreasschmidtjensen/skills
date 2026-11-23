@@ -3,7 +3,7 @@
 export const MIN_RUN_MS = 10000;
 export const QUIET_MS = 5000;
 export const QUIET_LIST_MS = 60000;
-export const CPU_QUIET = 1;
+export const CPU_QUIET = 10;
 export const SAMPLE_EVERY_MS = 2000; // re-read a non-shell terminal's screen at most this often
 export const SETTLED_EVERY_MS = 10000; // ... and this often once its screen is unchanged and already classified
 export const STALE_MS = 14000; // needs-input/quiet only count from a sample this fresh (> SETTLED_EVERY_MS + a poll)
@@ -48,6 +48,25 @@ const qualify = (term, id) => (id ? (machineOf(term.address) ? `${machineOf(term
 const spaceOf = (term) => qualify(term, term.labels?.["herdr.space"]);
 const tabOf = (term) => qualify(term, term.labels?.["herdr.tab"]);
 
+// Pagers and REPLs wait on you all the time by design: they are listed as running, never needs-input or quiet.
+const PAGERS = /^(less|more|most|man)$/;
+const REPLS = /^(python|python3(\.\d+)?|node|psql|mysql|sqlite3|irb|ghci|iex|redis-cli|lua)$/;
+const RUN_FLAGS = new Set(["-c", "-m", "-e", "-p", "-f", "--eval", "--print", "--command", "--execute", "--file"]); // run code instead of a prompt
+const base = (s) => String(s ?? "").replace(/^-/, "").split("/").pop();
+
+// args: argv array, or the command line as one string (split on whitespace), or null when unknown (then foreground.argv is tried).
+// A REPL is interactive only when argv is the program plus flags: a script/file argument, or -c/-m/-e, means it runs something.
+export const isInteractive = (term, args = null) => {
+  const name = base(term?.foreground?.name);
+  if (PAGERS.test(name)) return true;
+  if (!REPLS.test(name)) return false;
+  const a = args ?? term?.foreground?.argv ?? null;
+  if (a == null) return true;
+  const toks = Array.isArray(a) ? a.map(String) : String(a).trim().split(/\s+/).filter(Boolean);
+  const rest = toks.slice(1);
+  return !rest.some((t) => !t.startsWith("-") || RUN_FLAGS.has(t));
+};
+
 // ps output "pid cpu" per line -> Map pid -> cpu %. Lines that don't parse are skipped.
 export const parsePs = (text) => {
   const out = new Map();
@@ -58,11 +77,20 @@ export const parsePs = (text) => {
   return out;
 };
 
-// New per-terminal memory. sample = { sig, cpu, line } (screen signature, cpu %, last non-empty line) or null.
+// ps output "pid cpu args" per line -> Map pid -> { cpu, args } (args is the rest of the line, spaces kept).
+export const parsePsArgs = (text) => {
+  const out = new Map();
+  for (const line of String(text ?? "").split("\n")) {
+    const m = line.trim().match(/^(\d+)\s+([\d.]+)(?:\s+(.*))?$/);
+    if (m) out.set(Number(m[1]), { cpu: parseFloat(m[2]), args: m[3] ?? "" });
+  }
+  return out;
+};
+
+// New per-terminal memory. sample = { sig, cpu, line, args } (screen signature, cpu %, last non-empty line, command line) or null.
 // Contract: the mod supplies cpu with every sample (read with ps); terminals() has none. Without cpu, needs-input never fires.
 export const track = (prev, term, now, sample = null) => {
   if (!isPlain(term)) return { ignored: true };
-  const fresh = !prev || prev.ignored; // first time this terminal is tracked
   const m = { ...(prev && !prev.ignored ? prev : {}) };
   delete m.ignored;
   if (term.state === "finished") {
@@ -80,23 +108,21 @@ export const track = (prev, term, now, sample = null) => {
     return m;
   }
   const name = term.foreground?.name ?? "";
-  // A program already running when tracking began (a REPL or pager left open) takes its first
-  // screen as the quiet baseline; one started while tracked has none, so a prompt it shows at once counts.
-  if (!m.fg) { m.fg = { name, since: now, preexisting: fresh }; m.sig = null; m.sigSince = null; m.needs = null; m.sampleAt = null; m.quietSig = null; }
+  if (!m.fg) { m.fg = { name, since: now }; m.args = null; m.sig = null; m.sigSince = null; m.needs = null; m.sampleAt = null; m.quietSig = null; }
   else if (name) m.fg = { ...m.fg, name };
+  if (sample?.args != null) m.args = sample.args;
   if (sample && sample.sig == null && sample.cpu != null) {
     // Only the CPU was read (no screen read while it is busy or the last read is recent).
     m.cpu = sample.cpu;
     if (m.cpu >= CPU_QUIET) { m.sig = null; m.sigSince = null; m.needs = null; m.sampleAt = null; m.line = ""; }
   }
   if (sample && sample.sig != null) {
-    if (m.quietSig == null && m.fg.preexisting && m.sampleAt == null) m.quietSig = sample.sig;
     m.sampleAt = now;
     if (sample.sig !== m.sig) { m.sig = sample.sig; m.sigSince = now; m.needs = null; }
     m.cpu = sample.cpu ?? null;
     m.line = sample.line ?? "";
   }
-  if (m.sig != null && !m.needs && m.quietSig !== m.sig && (m.cpu ?? Infinity) < CPU_QUIET
+  if (m.sig != null && !m.needs && !isInteractive(term, m.args) && m.quietSig !== m.sig && (m.cpu ?? Infinity) < CPU_QUIET
       && now - m.sigSince >= QUIET_MS && looksLikePrompt(m.line)) {
     m.needs = { since: m.sigSince, sig: m.sig };
   }
@@ -117,6 +143,7 @@ const entryOf = (term, m, now) => {
   if (term.state === "finished") return m.mark?.kind === "exited" ? { kind: "exited", since: m.mark.since, exit_code: m.mark.exit_code } : null;
   if (!isShell(term)) {
     const fresh = m.sampleAt != null && (now == null || now - m.sampleAt <= STALE_MS);
+    if (isInteractive(term, m.args)) return null;
     if (m.needs && fresh) return { kind: "needs-input", since: m.needs.since, command: m.fg?.name ?? term.foreground?.name ?? "" };
     if (m.mark) return { kind: m.mark.kind, since: m.mark.since, command: m.mark.command };
     if (fresh && m.sig !== m.quietSig && m.sig != null && m.sigSince != null && now != null && now - m.sigSince >= QUIET_LIST_MS && !looksLikePrompt(m.line))
@@ -140,23 +167,58 @@ export const waitingList = (memory, terms, opts = {}) => {
       out.push({ address: term.address, space, tab, spaceName: spaceNames[space] ?? space, tabName: tabNames[tab] ?? tab, title: term.title ?? "", ...e });
     }
   }
-  const rank = (s) => {
-    if (s === currentSpace) return -1;
-    const i = spaceOrder.indexOf(s);
-    return i < 0 ? spaceOrder.length : i;
-  };
+  const rank = spaceRank(currentSpace, spaceOrder);
   return out.sort((a, b) =>
     rank(a.space) - rank(b.space) || (a.space < b.space ? -1 : a.space > b.space ? 1 : 0) ||
     (a.kind === "quiet") - (b.kind === "quiet") || a.since - b.since || (a.address < b.address ? -1 : 1));
 };
 
+// The current space first, then spaces() order, unknown spaces last.
+const spaceRank = (currentSpace, spaceOrder) => (s) => {
+  if (s === currentSpace) return -1;
+  const i = spaceOrder.indexOf(s);
+  return i < 0 ? spaceOrder.length : i;
+};
+
+const tail = (p) => {
+  const parts = String(p ?? "").split("/").filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : p ? "/" : "";
+};
+
+// Every live plain terminal for the sidebar list: the waiting entries' kinds merged onto all of them.
+// opts: as waitingList plus tabOrder (tab ids). No focused/now-dependent exclusion: the focused terminal's marks are already
+// cleared by markSeen, and the view marks it from the live focus. Rows hold no ages, so the published list changes only
+// when something about a terminal changes. Rows: { address, space, tab, spaceName, tabName, program, cwd, kind|null, since }.
+export const allRows = (memory, terms, opts = {}) => {
+  const { currentSpace = null, spaceOrder = [], tabOrder = [], spaceNames = {}, tabNames = {}, now = null } = opts;
+  const out = [];
+  for (const term of terms ?? []) {
+    if (!isPlain(term)) continue;
+    const m = memory?.[term.address];
+    const e = m && !m.ignored ? entryOf(term, m, now) : null;
+    if (term.state === "finished" && !e) continue; // an exited terminal is listed only while it holds its mark
+    const space = spaceOf(term), tab = tabOf(term);
+    const name = String(term.foreground?.name ?? "").replace(/^-/, "");
+    out.push({
+      address: term.address, space, tab, spaceName: spaceNames[space] ?? space, tabName: tabNames[tab] ?? "",
+      program: name || term.title || "", cwd: tail(term.foreground?.cwd ?? term.cwd), kind: e?.kind ?? null, since: e?.since ?? null,
+    });
+  }
+  const rank = spaceRank(currentSpace, spaceOrder);
+  const tabRank = (t) => { const i = tabOrder.indexOf(t); return i < 0 ? tabOrder.length : i; };
+  return out.sort((a, b) =>
+    rank(a.space) - rank(b.space) || (a.space < b.space ? -1 : a.space > b.space ? 1 : 0) ||
+    tabRank(a.tab) - tabRank(b.tab) || (a.address < b.address ? -1 : 1));
+};
+
 export const count = (list) => list.filter((e) => e.kind !== "quiet").length;
 
-// Only non-shell foregrounds are sampled. cpu (%, or null when unknown) comes from one ps per machine: a program
+// Only non-shell foregrounds are sampled. cpu (%, or null when unknown) and args (command line) come from one ps per machine: a program
 // that is using the CPU is not waiting, so its screen is not read. Otherwise read when there is no sample yet or the
 // last is SAMPLE_EVERY_MS old; every SETTLED_EVERY_MS once the screen has been unchanged for QUIET_MS and was classified.
-export const needsScreen = (term, memory, now, cpu = null) => {
+export const needsScreen = (term, memory, now, cpu = null, args = null) => {
   if (!isPlain(term) || term.state === "finished" || isShell(term)) return false;
+  if (isInteractive(term, args ?? memory?.[term.address]?.args)) return false;
   if (cpu != null && cpu >= CPU_QUIET) return false;
   const m = memory?.[term.address];
   const at = m?.sampleAt;

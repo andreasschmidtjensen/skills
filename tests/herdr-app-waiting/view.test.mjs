@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ageText, rowParts, groupBySpace, pickNext, moveAt, lockHeld, whereIs, LOCK_MS } from "../../herdr-app/mods/waiting/view.js";
+import { ageText, listHeader, listRow, rowParts, groupBySpace, pickNext, moveAt, lockHeld, whereIs, LOCK_MS } from "../../herdr-app/mods/waiting/view.js";
 
 test("ageText: seconds, minutes, hours, days", () => {
   assert.equal(ageText(4000), "4s");
@@ -65,4 +65,18 @@ test("whereIs finds pane, tab and space; null for a parked terminal", () => {
   const spaces = [{ id: "s1", tabs: [{ id: "tab1" }] }, { id: "s2", tabs: [{ id: "tab9" }] }];
   assert.deepEqual(whereIs("t1", panes, spaces), { pane: "p1", tab: "tab9", space: "s2" });
   assert.equal(whereIs("t2", panes, spaces), null);
+});
+
+test("listHeader: count in the title, dim at zero", () => {
+  assert.deepEqual(listHeader(0), { text: "Terminals · 0 waiting", dim: true });
+  assert.deepEqual(listHeader(3), { text: "Terminals · 3 waiting", dim: false });
+});
+
+test("listRow: marks for waiting kinds, none for running or idle, quiet dim", () => {
+  const r = (kind) => listRow({ kind, program: "make", tabName: "build", cwd: "app", address: "t1" });
+  assert.deepEqual([r("needs-input").mark, r("needs-input").tone], ["!", "blocked"]);
+  assert.deepEqual([r("finished").mark, r("finished").tone], ["✓", "done"]);
+  assert.deepEqual([r("quiet").mark, r("quiet").dim], ["·", true]);
+  assert.deepEqual([r(null).mark, r(null).tone, r(null).dim], ["", null, false]);
+  assert.deepEqual([r(null).program, r(null).tab, r(null).cwd], ["make", "build", "app"]);
 });

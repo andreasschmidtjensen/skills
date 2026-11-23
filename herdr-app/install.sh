@@ -4,8 +4,8 @@
 # Crew block opens with the Needs-you box and takes the height, Herdr's own Spaces list
 # stays below it with "This computer" and each machine, Herdr's Agents list is gone), and
 # binds ctrl-shift-h to open and close the Bridge. It also installs the `waiting` mod (plain
-# terminals that wait on you): a one-row badge block under Spaces in harbormaster-main, added
-# once, and the keys cmd-shift-j (the picker) and cmd-j (the next waiting terminal), each added
+# terminals that wait on you): a block above Spaces in harbormaster-main that lists every plain terminal
+# (waiting ones marked), added once (an earlier install's badge block becomes it), and the keys cmd-shift-j (the picker) and cmd-j (the next waiting terminal), each added
 # only if the key is free and the action isn't bound yet. Run it from any terminal while the
 # Herdr app is open. Safe to run again: it updates the mod and the sea layout, makes
 # harbormaster-main calm once and then leaves it alone (except that it swaps the Spaces
@@ -44,7 +44,7 @@ cp "$here"/mods/harbormaster/*.js "$here"/mods/harbormaster/*.svg "$here"/mods/h
   "$here"/mods/harbormaster/timing.sh "$here"/mods/harbormaster/categories.tsv "$home/mods/harbormaster/"
 cp "$here"/layouts/harbormaster-sea.json "$here"/layouts/harbormaster-sea.svg "$home/layouts/"
 echo "installed mods/harbormaster and the harbormaster-sea layout"
-waiting_new=0; [ -e "$home/mods/waiting" ] || waiting_new=1 # the badge is added only on a first install
+waiting_new=0; [ -e "$home/mods/waiting" ] || waiting_new=1 # the list block is added only on a first install
 mkdir -p "$home/mods/waiting"
 cp "$here"/mods/waiting/*.js "$here"/mods/waiting/mod.json "$home/mods/waiting/"
 echo "installed mods/waiting"
@@ -112,34 +112,54 @@ if [ -f "$main" ] && jq -e "$picker" "$main" >/dev/null 2>&1; then
   rm -f "$tmp"
 fi
 
-# 2c. The Waiting badge: one row under Herdr's Spaces list, in the column that holds the
-#     Crew block. Only when mods/waiting was not installed before this run (so a badge the user
-#     removed stays removed), and a layout that has a Waiting block already (or has no Crew
-#     column) is left alone.
-badge='[.. | objects | select(.content.mod? == "waiting")] | length > 0'
-if [ "$waiting_new" = 1 ] && [ -f "$main" ] && ! jq -e "$badge" "$main" >/dev/null 2>&1; then
-  tmp=$(mktemp)
-  if jq '
-    def badge: {"id": "waiting", "type": "block", "content": {"mod": "waiting", "props": {"role": "badge"}}, "size": {"px": 28}};
-    (first(paths(type == "object" and (.children? | type) == "array" and any(.children[]; .content.mod? == "harbormaster" and .content.props.role? == "crew"))) // null) as $p
-    | if $p == null then . else
-        (getpath($p).children | (map(.content.mod? == "spaces") | index(true))) as $i
-        | if $i == null then getpath($p).children += [badge]
-          else setpath($p + ["children"]; getpath($p).children[: $i + 1] + [badge] + getpath($p).children[$i + 1 :]) end
-      end' "$main" > "$tmp"; then
-    jqok=1
-  else
-    jqok=0
+# 2c. The Waiting list: a block above Herdr's Spaces list ("Terminals · n waiting" and every plain
+#     terminal below it, waiting ones marked), in the column that holds the Crew block. A block of
+#     an earlier install (role "badge", the row under Spaces) becomes this block and moves above
+#     Spaces, whenever install runs. A new block is added only when mods/waiting was not installed
+#     before this run (so one the user removed stays removed); a layout that has a Waiting block
+#     already (or has no Crew column) is left alone.
+has_waiting='[.. | objects | select(.content.mod? == "waiting")] | length > 0'
+has_badge='[.. | objects | select(.content.mod? == "waiting" and (.content.props.role? // "badge") == "badge")] | length > 0'
+has_list='[.. | objects | select(.content.mod? == "waiting" and .content.props.role? == "list")] | length > 0'
+list_defs='
+  def blk: {"id": "waiting", "type": "block", "content": {"mod": "waiting", "props": {"role": "list"}}, "size": {"weight": 0.5}};
+  def is_spaces: .content.mod? == "spaces";
+  def is_badge: .content.mod? == "waiting" and (.content.props.role? // "badge") == "badge";
+  def above_spaces($p): # insert blk just before the first Spaces block of the column at $p (or append)
+    (getpath($p).children | (map(is_spaces) | index(true))) as $i
+    | if $i == null then setpath($p + ["children"]; getpath($p).children + [blk])
+      else setpath($p + ["children"]; getpath($p).children[: $i] + [blk] + getpath($p).children[$i :]) end;'
+if [ -f "$main" ]; then
+  mode=""
+  if jq -e "$has_badge" "$main" >/dev/null 2>&1; then mode=migrate
+  elif [ "$waiting_new" = 1 ] && ! jq -e "$has_waiting" "$main" >/dev/null 2>&1; then mode=add; fi
+  if [ -n "$mode" ]; then
+    tmp=$(mktemp)
+    if jq --arg mode "$mode" "$list_defs"'
+      . as $orig
+      | if $mode == "migrate" then
+          (first(paths(type == "object" and is_badge)) // null) as $b
+          | ($orig | delpaths([$b])) as $d
+          | (first($d | paths(type == "object" and (.children? | type) == "array" and any(.children[]; is_spaces))) // null) as $p
+          | if $p == null then $orig | setpath($b; blk) else $d | above_spaces($p) end
+        else
+          (first(paths(type == "object" and (.children? | type) == "array" and any(.children[]; .content.mod? == "harbormaster" and .content.props.role? == "crew"))) // null) as $p
+          | if $p == null then . else above_spaces($p) end
+        end' "$main" > "$tmp"; then
+      jqok=1
+    else
+      jqok=0
+    fi
+    if [ "$jqok" = 0 ]; then
+      echo "install.sh: could not read harbormaster-main (jq failed); Waiting list not added" >&2
+    elif jq -e "$has_list" "$tmp" >/dev/null 2>&1; then
+      cat "$tmp" > "$main"
+      if [ "$mode" = migrate ]; then echo "moved the Waiting block in harbormaster-main above Spaces as the terminals list"; else echo "added the Waiting list above Spaces to harbormaster-main"; fi
+    else
+      echo "install.sh: harbormaster-main has no column with the Crew block; Waiting list not added (add a block with mod \"waiting\" and props {\"role\":\"list\"} yourself)" >&2
+    fi
+    rm -f "$tmp"
   fi
-  if [ "$jqok" = 0 ]; then
-    echo "install.sh: could not read harbormaster-main (jq failed); Waiting badge not added" >&2
-  elif jq -e "$badge" "$tmp" >/dev/null 2>&1; then
-    cat "$tmp" > "$main"
-    echo "added the Waiting badge to harbormaster-main"
-  else
-    echo "install.sh: harbormaster-main has no column with the Crew block; Waiting badge not added (add a block with mod \"waiting\" and props {\"role\":\"badge\"} yourself)" >&2
-  fi
-  rm -f "$tmp"
 fi
 
 # 3. ctrl-shift-h opens and closes the Bridge as a popup, unless that key is taken
@@ -162,7 +182,7 @@ fi
 
 # 3a. cmd-shift-j opens the Waiting picker and cmd-j focuses the next waiting terminal, each
 #     only if the key is free in every section and the action isn't bound to another key.
-#     waiting.next reaches the badge, so it does nothing while no Waiting badge is shown.
+#     waiting.next reaches the list (or badge) block, so it does nothing while none is shown.
 if [ -f "$keys" ]; then
   for pair in "cmd-shift-j=mod.open:waiting" "cmd-j=waiting.next"; do
     key=${pair%%=*}; act=${pair#*=}
@@ -198,6 +218,6 @@ cat <<'EOF'
 Done. ctrl-shift-h opens and closes the Bridge. Switch layouts with ctrl-shift-l, or:
   herdr-app do layout.switch '{"name":"harbormaster-main"}'   # your usual window, calm: Needs-you box, Crew, Herdr's Spaces list
   herdr-app do layout.switch '{"name":"harbormaster-sea"}'    # the harbor
-Waiting: cmd-shift-j lists the plain terminals that wait on you, cmd-j jumps to the next one (needs the badge under Spaces).
+Waiting: cmd-shift-j lists the plain terminals that wait on you, cmd-j jumps to the next one (needs the Waiting list above Spaces).
 To keep the Bridge beside the captain, click the pin on the Captain row of the Bridge, or "captain ↗" in the sidebar.
 EOF
