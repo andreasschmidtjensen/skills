@@ -128,7 +128,7 @@ test("install: an older main (Crew above Agents) is upgraded in place, keeping t
   writeFileSync(s.file("harbormaster-main.json"), JSON.stringify(old));
   s.run();
   const main = s.read("harbormaster-main.json");
-  assert.deepEqual(main.children[0].children.map((c) => c.id), ["brand", "mine", "crew", "spaces"]);
+  assert.deepEqual(main.children[0].children.map((c) => c.id), ["brand", "mine", "crew", "spaces", "waiting"]);
   assert.equal(main.children[0].children[2].content.props.needs, "box");
   const bytes = readFileSync(s.file("harbormaster-main.json"), "utf8");
   s.run();
@@ -172,8 +172,9 @@ test("install: a calm main with the #51 picker gets Herdr's Spaces block in its 
   writeFileSync(s.file("harbormaster-main.json"), JSON.stringify(main, null, 2) + "\n");
   assert.match(s.run(), /replaced the Spaces picker/);
   const after = s.read("harbormaster-main.json").children[0].children;
-  assert.deepEqual(after.map((c) => c.id), ["brand", "crew", "spaces"]);
+  // The first run added the Waiting badge under Spaces; the picker this test puts back comes after it.
+  assert.deepEqual(after.map((c) => c.id), ["brand", "crew", "waiting", "spaces"]);
   assert.deepEqual(after[1].size, { weight: 3 });
-  assert.deepEqual(after[2].content, { mod: "spaces" });
+  assert.deepEqual(after[3].content, { mod: "spaces" });
   assert.doesNotMatch(s.run(), /replaced the Spaces picker/);
 });

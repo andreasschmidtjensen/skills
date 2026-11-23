@@ -120,7 +120,11 @@ if [ -f "$main" ] && ! jq -e "$badge" "$main" >/dev/null 2>&1; then
   jq '
     def badge: {"id": "waiting", "type": "block", "content": {"mod": "waiting", "props": {"role": "badge"}}, "size": {"px": 28}};
     (first(paths(type == "object" and (.children? | type) == "array" and any(.children[]; .content.mod? == "harbormaster" and .content.props.role? == "crew"))) // null) as $p
-    | if $p == null then . else getpath($p).children += [badge] end' "$main" > "$tmp"
+    | if $p == null then . else
+        (getpath($p).children | (map(.content.mod? == "spaces") | index(true))) as $i
+        | if $i == null then getpath($p).children += [badge]
+          else setpath($p + ["children"]; getpath($p).children[: $i + 1] + [badge] + getpath($p).children[$i + 1 :]) end
+      end' "$main" > "$tmp"
   if jq -e "$badge" "$tmp" >/dev/null 2>&1; then
     cat "$tmp" > "$main"
     echo "added the Waiting badge to harbormaster-main"
