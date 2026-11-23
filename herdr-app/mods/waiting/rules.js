@@ -1,0 +1,132 @@
+// Pure rules for the waiting mod: which plain terminals wait for the user. No "herdr"/"gpui-kit" imports,
+// no Date.now(): time and samples are passed in. Per-terminal memory lives in a map address -> memory.
+export const MIN_RUN_MS = 10000;
+export const QUIET_MS = 5000;
+export const QUIET_LIST_MS = 60000;
+export const CPU_QUIET = 1;
+export const SAMPLE_EVERY_MS = 2000; // re-read a non-shell terminal's screen at most this often
+export const STALE_MS = 6000; // needs-input/quiet only count from a sample this fresh
+
+const SHELLS = /^-?(zsh|bash|sh|fish|dash|ksh|nu|tcsh|csh)$/;
+
+export const lastLine = (text) => {
+  const lines = String(text ?? "").split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) if (lines[i].trim()) return lines[i].trim();
+  return "";
+};
+
+export const screenSig = (text) => {
+  const s = String(text ?? "");
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return `${s.length}:${h}`;
+};
+
+export const looksLikePrompt = (line) => {
+  const l = String(line ?? "").trim();
+  if (!l) return false;
+  if (/[?:>]$/.test(l)) return true;
+  if (/\[[yn]\/[yn]\]$/i.test(l) || /\((yes\/no|y\/n)\)$/i.test(l)) return true;
+  return /password|passphrase|continue/i.test(l);
+};
+
+// Agents (status or program.agent) and hidden workers (no space label) are not plain terminals.
+export const isPlain = (term) =>
+  !!term && !(term.status != null) && !term.program?.agent && !!term.labels?.["herdr.space"];
+
+export const isShell = (term) => {
+  if (term.program && typeof term.program.shell === "boolean") return term.program.shell;
+  const name = term.foreground?.name;
+  return !name || SHELLS.test(name);
+};
+
+const spaceOf = (term) => term.labels?.["herdr.space"] ?? "";
+
+// New per-terminal memory. sample = { sig, cpu, line } (screen signature, cpu %, last non-empty line) or null.
+// Contract: the mod supplies cpu with every sample (read with ps); terminals() has none. Without cpu, needs-input never fires.
+export const track = (prev, term, now, sample = null) => {
+  if (!isPlain(term)) return { ignored: true };
+  const m = { ...(prev && !prev.ignored ? prev : {}) };
+  delete m.ignored;
+  if (term.state === "finished") {
+    m.fg = null; m.needs = null; m.sig = null; m.sampleAt = null; m.quietSig = null;
+    const since = term.finished_ms ?? m.exitSince ?? now;
+    m.exitSince = since;
+    const seen = m.seenAt != null && m.seenAt >= since;
+    m.mark = seen ? null : (m.mark?.kind === "exited" ? m.mark : { kind: "exited", since, exit_code: term.exit_code ?? null });
+    return m;
+  }
+  m.exitSince = null;
+  if (isShell(term)) {
+    if (m.fg && now - m.fg.since >= MIN_RUN_MS) m.mark = { kind: "finished", since: now, command: m.fg.name };
+    m.fg = null; m.needs = null; m.sig = null; m.sigSince = null; m.cpu = null; m.sampleAt = null; m.quietSig = null;
+    return m;
+  }
+  const name = term.foreground?.name ?? "";
+  if (!m.fg) { m.fg = { name, since: now }; m.sig = null; m.sigSince = null; m.needs = null; m.sampleAt = null; }
+  else if (name) m.fg = { ...m.fg, name };
+  if (sample && sample.sig != null) {
+    m.sampleAt = now;
+    if (m.quietSig == null) m.quietSig = sample.sig; // baseline: what was on screen when tracking began
+    if (sample.sig !== m.sig) { m.sig = sample.sig; m.sigSince = now; m.needs = null; }
+    m.cpu = sample.cpu ?? null;
+    m.line = sample.line ?? "";
+  }
+  if (m.sig != null && !m.needs && m.quietSig !== m.sig && (m.cpu ?? Infinity) < CPU_QUIET
+      && now - m.sigSince >= QUIET_MS && looksLikePrompt(m.line)) {
+    m.needs = { since: m.sigSince, sig: m.sig };
+  }
+  return m;
+};
+
+// The user is looking at this terminal: clear marks raised up to now; needs-input stays cleared for this screen.
+export const markSeen = (memory, address, now) => {
+  const m = memory?.[address];
+  if (!m || m.ignored) return memory;
+  const n = { ...m, seenAt: now, needs: null };
+  if (m.sig != null) n.quietSig = m.sig; // REPLs/pagers left open stay quiet until the screen changes
+  if (m.mark && m.mark.since <= now) n.mark = null;
+  return { ...memory, [address]: n };
+};
+
+const entryOf = (term, m, now) => {
+  if (term.state === "finished") return m.mark?.kind === "exited" ? { kind: "exited", since: m.mark.since, exit_code: m.mark.exit_code } : null;
+  if (!isShell(term)) {
+    const fresh = m.sampleAt != null && (now == null || now - m.sampleAt <= STALE_MS);
+    if (m.needs && fresh) return { kind: "needs-input", since: m.needs.since, command: m.fg?.name ?? term.foreground?.name ?? "" };
+    if (m.mark) return { kind: m.mark.kind, since: m.mark.since, command: m.mark.command };
+    if (fresh && m.sig !== m.quietSig && m.sig != null && m.sigSince != null && now != null && now - m.sigSince >= QUIET_LIST_MS && !looksLikePrompt(m.line))
+      return { kind: "quiet", since: m.sigSince, command: m.fg?.name ?? term.foreground?.name ?? "" };
+    return null;
+  }
+  return m.mark?.kind === "finished" ? { kind: "finished", since: m.mark.since, command: m.mark.command } : null;
+};
+
+// opts: { currentSpace, spaceOrder, focused (address), now }. Flat list, contiguous by space.
+export const waitingList = (memory, terms, opts = {}) => {
+  const { currentSpace = null, spaceOrder = [], focused = null, now = null } = opts;
+  const out = [];
+  for (const term of terms ?? []) {
+    const m = memory?.[term.address];
+    if (!m || m.ignored || !isPlain(term) || term.address === focused) continue;
+    const e = entryOf(term, m, now);
+    if (e) out.push({ address: term.address, space: spaceOf(term), tab: term.labels?.["herdr.tab"] ?? "", title: term.title ?? "", ...e });
+  }
+  const rank = (s) => {
+    if (s === currentSpace) return -1;
+    const i = spaceOrder.indexOf(s);
+    return i < 0 ? spaceOrder.length : i;
+  };
+  return out.sort((a, b) =>
+    rank(a.space) - rank(b.space) || (a.space < b.space ? -1 : a.space > b.space ? 1 : 0) ||
+    (a.kind === "quiet") - (b.kind === "quiet") || a.since - b.since || (a.address < b.address ? -1 : 1));
+};
+
+export const count = (list) => list.filter((e) => e.kind !== "quiet").length;
+
+// Only non-shell foregrounds are sampled, and only when there is no sample yet or the last one is SAMPLE_EVERY_MS old.
+export const needsScreen = (term, memory, now) => {
+  if (!isPlain(term) || term.state === "finished" || isShell(term)) return false;
+  const at = memory?.[term.address]?.sampleAt;
+  return at == null || now - at >= SAMPLE_EVERY_MS;
+};
