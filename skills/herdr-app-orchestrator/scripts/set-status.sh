@@ -4,6 +4,7 @@
 #
 # Usage: set-status.sh <run-directory> [<status>] [--type TYPE] [--topic TEXT] [--progress TEXT] [--tasks MERGED/PLANNED]
 #          [--autonomy L0|L1|L2] [--budget TOKENS] [--budget-answered] [--issue URL]... [--pr REPO URL]... [--related REPO URL]... [--waiting "NAME..."]
+#          [--oneoff checkout|worktree] [--pushed BRANCH]
 #
 # <status> is running, "waiting for user: <question>", "blocked: <reason>", or
 # finished, the vocabulary herdr-app-captain's scripts/lib.sh documents. Without
@@ -39,13 +40,17 @@
 #               run reviews, or one the run depends on; added once
 #   --waiting   every agent now waiting for an answer, space-separated, replacing
 #               the earlier list; "" clears it
+#   --oneoff    the run is a one-off (references/oneoff.md) working in the user's
+#               checkout or in a worktree; "" clears it. Harbormaster shows it as a 1x run
+#   --pushed    the branch a one-off pushed without opening a PR (no GitHub remote, or
+#               pr=no), so Harbormaster shows it where a PR would be; "" clears it
 #
 # status.json: {branch, folder, status, state, type, topic, progress, tasks: {merged, planned}, autonomy,
-# budget, budget_asked, budget_answered, issues: [url], prs: [{repo, url}], related: [{repo, url}], waiting: [name], updated}, where state is
+# budget, budget_asked, budget_answered, oneoff, pushed, issues: [url], prs: [{repo, url}], related: [{repo, url}], waiting: [name], updated}, where state is
 # running, waiting, blocked, or finished, and tokens, which each call counts with tokens.sh
 # (never lowering it; a failed count keeps the last one). Fields other scripts write are
 # kept. It outlives the terminal, so it is the record of a finished run. The labels, for live lists such as Herdr's Agents list:
-# run.status (the state), run.type, run.autonomy, run.topic, progress, and run.prs (the PR URLs, space-separated).
+# run.status (the state), run.type, run.autonomy, run.topic, run.oneoff, progress, and run.prs (the PR URLs, space-separated).
 # The tab becomes "🐙 <name>", "🐙 ✋ <name>" or "🐙 ✓ <name>", where <name> is
 # "<type> · <topic>", with the branch for a missing topic and no type part without one,
 # e.g. "🐙 rev · Triage decision", as Harbormaster's orchestratorTabName() names it.
@@ -57,7 +62,7 @@ set -u
 . "$(dirname "$0")/lib.sh"
 
 usage() {
-  echo 'usage: set-status.sh <run-directory> [<status>] [--type feat|fix|rev|expl] [--topic TEXT] [--progress TEXT] [--tasks M/N] [--autonomy L0|L1|L2] [--budget TOKENS] [--budget-answered] [--issue URL]... [--pr REPO URL]... [--related REPO URL]... [--waiting "NAME..."]' >&2
+  echo 'usage: set-status.sh <run-directory> [<status>] [--type feat|fix|rev|expl] [--topic TEXT] [--progress TEXT] [--tasks M/N] [--autonomy L0|L1|L2] [--budget TOKENS] [--budget-answered] [--issue URL]... [--pr REPO URL]... [--related REPO URL]... [--waiting "NAME..."] [--oneoff checkout|worktree] [--pushed BRANCH]' >&2
   exit 2
 }
 [ $# -ge 1 ] || usage
@@ -68,7 +73,7 @@ if [ $# -gt 0 ] && [ "${1#--}" = "$1" ]; then
   status=$1
   shift
 fi
-autonomy= budget= budget_set= budget_answered= type= type_set= topic= topic_set= progress= progress_set= tasks= waiting= waiting_set= issues=() prs=() related=()
+autonomy= budget= budget_set= budget_answered= type= type_set= topic= topic_set= progress= progress_set= tasks= waiting= waiting_set= oneoff= oneoff_set= pushed= pushed_set= issues=() prs=() related=()
 while [ $# -gt 0 ]; do
   case $1 in
     --type)
@@ -105,11 +110,16 @@ while [ $# -gt 0 ]; do
     --pr) [ $# -ge 3 ] || usage; prs+=("$2" "$3"); shift 3 ;;
     --related) [ $# -ge 3 ] || usage; related+=("$2" "$3"); shift 3 ;;
     --waiting) [ $# -ge 2 ] || usage; waiting=$2 waiting_set=1; shift 2 ;;
+    --oneoff)
+      [ $# -ge 2 ] || usage
+      case $2 in checkout | worktree | '') ;; *) echo "--oneoff is checkout or worktree, not: $2" >&2; exit 2 ;; esac
+      oneoff=$2 oneoff_set=1; shift 2 ;;
+    --pushed) [ $# -ge 2 ] || usage; pushed=$2 pushed_set=1; shift 2 ;;
     *) usage ;;
   esac
 done
 # One line each: a newline would split the labels apart.
-case $status$topic$progress in *$'\n'*) echo "status, --topic and --progress must be one line" >&2; exit 2 ;; esac
+case $status$topic$progress$pushed in *$'\n'*) echo "status, --topic, --progress and --pushed must be one line" >&2; exit 2 ;; esac
 
 new_status=$status
 case $status in
@@ -164,12 +174,15 @@ status_update "$dir" "$STATUS_TOKENS_FILTER | $(cat <<'JQ'
   | .prs = reduce $prs[] as $p (.prs;
       if any(.[]; .repo == $p.repo) then map(if .repo == $p.repo then $p else . end) else . + [$p] end)
   | .related = reduce $related[] as $p (.related; if any(.[]; .url == $p.url) then . else . + [$p] end)
+  | if $oneoff_set != "" then .oneoff = (if $oneoff == "" then null else $oneoff end) else . end
+  | if $pushed_set != "" then .pushed = (if $pushed == "" then null else $pushed end) else . end
   | if $waiting_set != "" then .waiting = [$waiting | splits("\\s+") | select(. != "")] else . end
   | {branch, folder, status, state, type, topic, progress, tasks, autonomy, issues, prs, related, waiting, updated} + .
 JQ
 )" --argjson tokens "$tokens" --argjson issues "$issues_json" --argjson prs "$prs_json" --argjson related "$related_json" \
   --arg branch "$branch" --arg folder "$folder" --arg status "$status" --arg state "$state" \
   --arg type "$type" --arg type_set "$type_set" --arg topic "$topic" --arg topic_set "$topic_set" --arg progress "$progress" --arg progress_set "$progress_set" --arg tasks "$tasks" --arg autonomy "$autonomy" --arg budget "$budget" --arg budget_set "$budget_set" --arg budget_answered "$budget_answered" \
+  --arg oneoff "$oneoff" --arg oneoff_set "$oneoff_set" --arg pushed "$pushed" --arg pushed_set "$pushed_set" \
   --arg waiting "$waiting" --arg waiting_set "$waiting_set" --arg updated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" || exit 1
 
 # Crossing the soft budget is noticed here, where the numbers are, once per budget value:
@@ -185,7 +198,7 @@ fi
 
 # A label change is an hc event, which wakes herdr-app-captain's watcher at once.
 if [ -n "$terminal" ]; then
-  labels=$(jq -r '"run.status=\(.state)", "run.type=\(.type // "")", "run.autonomy=\(.autonomy // "L0")", "run.topic=\(.topic // "")", "progress=\(.progress // "")", "run.prs=\([.prs[].url] | join(" "))"' \
+  labels=$(jq -r '"run.status=\(.state)", "run.type=\(.type // "")", "run.autonomy=\(.autonomy // "L0")", "run.topic=\(.topic // "")", "run.oneoff=\(.oneoff // "")", "progress=\(.progress // "")", "run.prs=\([.prs[].url] | join(" "))"' \
     "$dir/status.json")
   # A loop rather than mapfile, which macOS's bash 3.2 lacks.
   label_args=()

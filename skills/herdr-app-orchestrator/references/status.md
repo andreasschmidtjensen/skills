@@ -20,6 +20,8 @@ The same script publishes the run's other facts, to `status.json` in the run dir
 - `--pr <owner/repo> <url>`: as soon as a repository's PR exists, for the run's own PRs only.
 - `--related <owner/repo> <url>`: each PR the run is about but did not open, such as the PR a review-only run reviews or one the run depends on.
 - `--waiting "<agent names>"`: while agents wait for an answer from you or the user, naming every one each time, since it replaces the list; `--waiting ""` once none do.
+- `--oneoff checkout|worktree`: once, for a one-off run ([oneoff.md](oneoff.md)): where it works. Harbormaster shows the run as a one-off. Terminal label `run.oneoff`.
+- `--pushed <branch>`: when a one-off pushed its branch and opened no PR (no GitHub remote, or `pr=no`), so Harbormaster shows the branch where a PR would be.
 - `--autonomy L0|L1|L2`: at the start, and when the user changes it (the skill's section 6).
 - `--budget <tokens>` and `--budget-answered`: below.
 
