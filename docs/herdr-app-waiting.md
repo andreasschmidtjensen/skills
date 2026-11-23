@@ -5,7 +5,7 @@ Waiting is a Herdr app mod. It lists every plain terminal (not an agent, not a h
 ## What counts as waiting
 
 - **Finished.** A command ran for 10 seconds or more and the shell is back in front. It stays until you focus the terminal.
-- **Exited.** The terminal's process exited. It stays until you focus the terminal.
+- **Exited.** Only for a terminal Herdr still lists after its process exited (one kept by `hc run --keep` or started outside a pane). Herdr closes the pane and tab of a terminal whose program exits, so an ordinary exited shell leaves nothing to jump to and is not listed.
 - **Needs input.** A program that is not a shell has had the same screen for 5 seconds, uses about no CPU (under 1%), and its last non-empty line looks like a prompt: it ends in `?`, `:` or `>`, ends in `[y/N]` or `(yes/no)`, or contains `password`, `passphrase` or `continue`. This is a heuristic: it can miss a prompt and it can flag a line that only looks like one.
 - **Quiet.** A program that is not a shell has had the same screen for 60 seconds or more and no prompt-looking last line. It is listed greyed under **Quiet** and is not counted.
 - **REPL and pager guard.** The screen a program shows when Waiting first sees it, and the screen you leave behind when you focus it, never count as needs-input or quiet. A REPL or pager you left open stays out of the list until its screen changes.
