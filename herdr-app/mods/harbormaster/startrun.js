@@ -183,8 +183,10 @@ export function buildPrompt({ kind, input, profile, drafts = "herdr", agent = "c
     const { kind, model } = roleValue(profile[r], agent);
     return [...(kind !== agent ? [`${r}=${kind}`] : []), ...(model ? [`${r}-model=${model}`] : [])];
   });
-  const opts = [...(agent === "claude" ? [] : [`agent=${agent}`]), ...roles, `autonomy=${profile.autonomy}`].join(" ");
-  if (kind === "oneoff") return skillPrompt(agent, "herdr-app-orchestrator", `oneoff where=${where} ${opts} ${work.split(" ").filter((w) => !/^where=/i.test(w)).join(" ")}`);
+  const agentOpt = agent === "claude" ? [] : [`agent=${agent}`];
+  const opts = [...agentOpt, ...roles, `autonomy=${profile.autonomy}`].join(" ");
+  // A one-off has no sub-agents: no implementer, reviewer or specialist.
+  if (kind === "oneoff") return skillPrompt(agent, "herdr-app-orchestrator", `oneoff where=${where} ${[...agentOpt, `autonomy=${profile.autonomy}`].join(" ")} ${work.split(" ").filter((w) => !/^where=/i.test(w)).join(" ")}`);
   return skillPrompt(agent, "herdr-app-orchestrator", kind === "review" ? `review ${work} type=rev review-drafts=${drafts} ${opts}` : `${work} ${opts}`);
 }
 

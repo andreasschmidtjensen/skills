@@ -43,7 +43,7 @@ Write the run's profiles and options, with the answers to the start-of-run quest
 
 ## One-off runs
 
-`$ARGUMENTS` starting with `oneoff` is the one-off preset: `oneoff [where=checkout|worktree] [pr=no] [autonomy=..] <description>`. It is for a simple task the user wants tracked in Harbormaster without orchestration. `where` defaults to `checkout`. Run name (for `init-run.sh`) `oneoff-<slug>`, a short slug of the description; prefix `one-<slug>`; no integration branch, worktree or space of the run's own. Decide `type` yourself (`feat`, `fix` or `expl`), run proof `T1`, `task-review=no`, `final-review=no`, `autonomy` as given (default `L0`). Ask at most one start-of-run question: what is ambiguous, plus whether to review before finishing (default no); with nothing ambiguous, ask nothing. Then read [oneoff.md](oneoff.md); it replaces sections 2 to 5 and 8.
+`$ARGUMENTS` starting with `oneoff` is the one-off preset: `oneoff [where=checkout|worktree] [pr=no] [autonomy=..] <description>`. It is for a simple task the user wants tracked in Harbormaster without orchestration. `where` defaults to `checkout`. Run name (for `init-run.sh`) `oneoff-<slug>`, a short slug of the description; prefix `one-<slug>`; no integration branch, worktree or space of the run's own. Decide `type` yourself (`feat`, `fix` or `expl`), run proof `T1`, `task-review=no`, `final-review=no`, `autonomy=L1` unless given. Ask at most one start-of-run question, in one `question.md`: what is ambiguous, whether the checkout has changes (see oneoff.md) and whether to review before finishing (default no); with nothing to ask, ask nothing. Then read [oneoff.md](oneoff.md); it replaces sections 2 to 5 and 8.
 
 ## Repositories
 

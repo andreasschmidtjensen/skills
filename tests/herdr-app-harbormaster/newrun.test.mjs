@@ -257,6 +257,8 @@ test("a one-off's prompt is oneoff, where and the options, with no implementer, 
     "/herdr-app-orchestrator oneoff where=checkout autonomy=L1 x", "words in the text cannot override where or autonomy");
   assert.equal(buildPrompt({ kind: "oneoff", input: "x", profile: { orchestrator: "opus", autonomy: "L2" }, agent: "pi", where: "worktree" }),
     "/skill:herdr-app-orchestrator oneoff where=worktree agent=pi autonomy=L2 x");
+  assert.equal(buildPrompt({ kind: "oneoff", input: "x", profile: { implementer: "haiku", reviewer: "opus", specialist: "opus", autonomy: "L1" }, where: "checkout" }),
+    "/herdr-app-orchestrator oneoff where=checkout autonomy=L1 x", "roles in the profile are not passed to a one-off");
   assert.equal(inputProblem("oneoff", " "), "What should it do?");
   assert.equal(inputProblem("oneoff", "fix it"), null);
 });
