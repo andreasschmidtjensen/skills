@@ -3,11 +3,14 @@
 # the harbormaster-sea layout, and harbormaster-main (Herdr's main layout made calm: the
 # Crew block opens with the Needs-you box and takes the height, Herdr's own Spaces list
 # stays below it with "This computer" and each machine, Herdr's Agents list is gone), and
-# binds ctrl-shift-h to open and close the Bridge. Run it from any terminal while the
+# binds ctrl-shift-h to open and close the Bridge. It also installs the `waiting` mod (plain
+# terminals that wait on you): a one-row badge block under Spaces in harbormaster-main, added
+# once, and the keys cmd-shift-j (the picker) and cmd-j (the next waiting terminal), each added
+# only if the key is free and the action isn't bound yet. Run it from any terminal while the
 # Herdr app is open. Safe to run again: it updates the mod and the sea layout, makes
 # harbormaster-main calm once and then leaves it alone (except that it swaps the Spaces
-# picker of an earlier version for Herdr's Spaces list), and adds the key only if it is missing. It refuses to
-# replace a mod or layout of the same name that isn't Harbormaster's, and removes the
+# picker of an earlier version for Herdr's Spaces list), and adds the keys only if they are missing. It refuses to
+# replace a mod or layout of the same name that isn't ours (Harbormaster's, Waiting's), and removes the
 # harbormaster-board and harbormaster-needs layouts of earlier versions, and the Harbor 3D
 # copy of an earlier version (Harbor 3D is not installed: it runs from the repository).
 #
@@ -30,6 +33,8 @@ ours() { # <file> <jq test>: true when the file is missing or passes the test
 }
 { [ ! -e "$home/mods/harbormaster" ] || jq -e '.title == "Harbormaster"' "$home/mods/harbormaster/mod.json" >/dev/null 2>&1; } \
   || die "mods/harbormaster exists and isn't Harbormaster; move it aside first"
+{ [ ! -e "$home/mods/waiting" ] || jq -e '.title == "Waiting"' "$home/mods/waiting/mod.json" >/dev/null 2>&1; } \
+  || die "mods/waiting exists and isn't the Waiting mod; move it aside first"
 ours "$home/layouts/harbormaster-sea.json" '.id == "hs-root"' \
   || die "layouts/harbormaster-sea.json exists and isn't Harbormaster's; move it aside first"
 mkdir -p "$home/mods/harbormaster" "$home/layouts"
@@ -39,6 +44,10 @@ cp "$here"/mods/harbormaster/*.js "$here"/mods/harbormaster/*.svg "$here"/mods/h
   "$here"/mods/harbormaster/timing.sh "$here"/mods/harbormaster/categories.tsv "$home/mods/harbormaster/"
 cp "$here"/layouts/harbormaster-sea.json "$here"/layouts/harbormaster-sea.svg "$home/layouts/"
 echo "installed mods/harbormaster and the harbormaster-sea layout"
+waiting_new=0; [ -e "$home/mods/waiting" ] || waiting_new=1 # the badge is added only on a first install
+mkdir -p "$home/mods/waiting"
+cp "$here"/mods/waiting/*.js "$here"/mods/waiting/mod.json "$home/mods/waiting/"
+echo "installed mods/waiting"
 # board.js became overview.js.
 rm -f "$home/mods/harbormaster/board.js"
 # The run board of earlier versions; its views are gone from the mod. Only ours.
@@ -103,6 +112,36 @@ if [ -f "$main" ] && jq -e "$picker" "$main" >/dev/null 2>&1; then
   rm -f "$tmp"
 fi
 
+# 2c. The Waiting badge: one row under Herdr's Spaces list, in the column that holds the
+#     Crew block. Only when mods/waiting was not installed before this run (so a badge the user
+#     removed stays removed), and a layout that has a Waiting block already (or has no Crew
+#     column) is left alone.
+badge='[.. | objects | select(.content.mod? == "waiting")] | length > 0'
+if [ "$waiting_new" = 1 ] && [ -f "$main" ] && ! jq -e "$badge" "$main" >/dev/null 2>&1; then
+  tmp=$(mktemp)
+  if jq '
+    def badge: {"id": "waiting", "type": "block", "content": {"mod": "waiting", "props": {"role": "badge"}}, "size": {"px": 28}};
+    (first(paths(type == "object" and (.children? | type) == "array" and any(.children[]; .content.mod? == "harbormaster" and .content.props.role? == "crew"))) // null) as $p
+    | if $p == null then . else
+        (getpath($p).children | (map(.content.mod? == "spaces") | index(true))) as $i
+        | if $i == null then getpath($p).children += [badge]
+          else setpath($p + ["children"]; getpath($p).children[: $i + 1] + [badge] + getpath($p).children[$i + 1 :]) end
+      end' "$main" > "$tmp"; then
+    jqok=1
+  else
+    jqok=0
+  fi
+  if [ "$jqok" = 0 ]; then
+    echo "install.sh: could not read harbormaster-main (jq failed); Waiting badge not added" >&2
+  elif jq -e "$badge" "$tmp" >/dev/null 2>&1; then
+    cat "$tmp" > "$main"
+    echo "added the Waiting badge to harbormaster-main"
+  else
+    echo "install.sh: harbormaster-main has no column with the Crew block; Waiting badge not added (add a block with mod \"waiting\" and props {\"role\":\"badge\"} yourself)" >&2
+  fi
+  rm -f "$tmp"
+fi
+
 # 3. ctrl-shift-h opens and closes the Bridge as a popup, unless that key is taken
 #    in any section (a layout's or mod's own binding wins over global). keys.json holds
 #    every key, so without one there is nothing safe to add to.
@@ -121,6 +160,27 @@ else
   echo "bound ctrl-shift-h to open and close the Bridge"
 fi
 
+# 3a. cmd-shift-j opens the Waiting picker and cmd-j focuses the next waiting terminal, each
+#     only if the key is free in every section and the action isn't bound to another key.
+#     waiting.next reaches the badge, so it does nothing while no Waiting badge is shown.
+if [ -f "$keys" ]; then
+  for pair in "cmd-shift-j=mod.open:waiting" "cmd-j=waiting.next"; do
+    key=${pair%%=*}; act=${pair#*=}
+    if jq -e --arg a "$act" '[.[] | objects | to_entries[] | select(.value == $a)] | length > 0' "$keys" >/dev/null; then
+      :
+    elif jq -e --arg k "$key" '[.[] | objects | has($k)] | any' "$keys" >/dev/null; then
+      echo "$key is taken in keys.json; to use it for Waiting, add \"$key\": \"$act\" under \"global\" (or use another free key)"
+    else
+      tmp=$(mktemp)
+      jq --arg k "$key" --arg a "$act" '.global = ((.global // {}) + {($k): $a})' "$keys" > "$tmp" && cat "$tmp" > "$keys"
+      rm -f "$tmp"
+      echo "bound $key to $act"
+    fi
+  done
+else
+  echo "no keys.json yet; for Waiting, add \"cmd-shift-j\": \"mod.open:waiting\" and \"cmd-j\": \"waiting.next\" under \"global\""
+fi
+
 # 3b. Harbor 3D is not installed (it runs from the repository); an earlier version copied it
 #     to <home>/harbor3d. Only ours (package.json named harbor3d): any other folder stays.
 h3="$home/harbor3d"
@@ -131,11 +191,13 @@ fi
 
 # 4. Check the mod.
 herdr-app check "$home/mods/harbormaster"
+herdr-app check "$home/mods/waiting"
 
 cat <<'EOF'
 
 Done. ctrl-shift-h opens and closes the Bridge. Switch layouts with ctrl-shift-l, or:
   herdr-app do layout.switch '{"name":"harbormaster-main"}'   # your usual window, calm: Needs-you box, Crew, Herdr's Spaces list
   herdr-app do layout.switch '{"name":"harbormaster-sea"}'    # the harbor
+Waiting: cmd-shift-j lists the plain terminals that wait on you, cmd-j jumps to the next one (needs the badge under Spaces).
 To keep the Bridge beside the captain, click the pin on the Captain row of the Bridge, or "captain ↗" in the sidebar.
 EOF
