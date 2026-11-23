@@ -4,7 +4,7 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { orchestratorState, workersOf } from "./live.js";
-import { runName, typeTag } from "./ui.js";
+import { runName, typeTag, oneoffTag } from "./ui.js";
 import { rowEdge } from "./crewrows.js";
 import { attOf } from "./needitems.js";
 import { runStatus, runFacts } from "./needbox.js";
@@ -44,6 +44,7 @@ function runLine(view, t, r, ctx, block, narrow, compact) {
     .child(h_flex().w(12).flex_none().justify_center().child(dot))
     .child(div().min_w(0).truncate().text_size(12.5).text_color(t.foreground).child(name.title))
     .when(Boolean(r.type), (el) => el.child(typeTag(t, r.type)))
+    .when(Boolean(r.oneoff), (el) => el.child(oneoffTag(t, r.oneoff)))
     .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(red ? t.blocked : t.dim).child(text))
     .child(chevron(t, open));
   return v_flex().id(`bridge-item-${r.key}`).flex_none().gap(6).child(line).when(open, (el) => el.child(card(view, t, r, ctx, compact ?? narrow)));
@@ -90,6 +91,7 @@ export function parkedBlock(view, t, runs, ctx) {
         .child(h_flex().gap(6).items_center().min_w(0)
           .child(div().min_w(0).truncate().text_size(12.5).text_color(t.foreground).child(name.title))
           .when(Boolean(r.type), (el) => el.child(typeTag(t, r.type)))
+          .when(Boolean(r.oneoff), (el) => el.child(oneoffTag(t, r.oneoff)))
           .child(div().flex_none().text_size(11).text_color(t.dim).child(age)))
         .child(div().min_w(0).truncate().text_size(11).text_color(t.muted).child(waits)))
       .child(resume)

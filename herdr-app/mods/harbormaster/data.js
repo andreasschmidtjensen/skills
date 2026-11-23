@@ -262,6 +262,10 @@ function parseRun(machine, chunk) {
     phase: runPhase(statusLine ?? status.status),
     // What kind of run: feat, fix, rev or expl (set-status.sh --type).
     type: status.type ?? null,
+    // A one-off (set-status.sh --oneoff): "checkout" or "worktree"; it has no tasks, and no claims unless plan.md has them.
+    oneoff: status.oneoff === "checkout" || status.oneoff === "worktree" ? status.oneoff : null,
+    // The branch a run pushed without opening a PR (a remote that is not GitHub): the user opens it.
+    pushed: typeof status.pushed === "string" && status.pushed ? status.pushed : null,
     topic: status.topic ?? null,
     // How much the orchestrator decides itself (set-status.sh --autonomy); a missing one is L0.
     autonomy,

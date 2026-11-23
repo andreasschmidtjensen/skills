@@ -4,6 +4,14 @@
 // A PR's state as a word ("Open", "Draft", "Merged"), or null when it could not be read.
 export const prStateText = (pr) => (pr.state === "UNKNOWN" ? null : pr.state === "DRAFT" ? "Draft" : pr.state[0] + pr.state.slice(1).toLowerCase());
 
+// What a run with no PR says where the PRs would show: the pushed branch when it has one, else
+// "No pull request yet" (a finished run: "None"); null when it says nothing (a finished card).
+export function noPrText(r, { card = false } = {}) {
+  if (r.pushed) return `branch ${r.pushed} pushed · open the PR yourself`;
+  if (r.phase === "finished") return card ? null : "None";
+  return "No pull request yet";
+}
+
 // A PR's review as [text, tone]: who approved or asked for changes, when we know.
 export function reviewText(pr) {
   const who = (list) => (list?.length ? ` by ${list.join(", ")}` : "");

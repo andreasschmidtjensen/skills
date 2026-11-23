@@ -6,7 +6,7 @@ import { openOverlay, props } from "herdr";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { stats, runPhase, decisionQueue, decisionItems, markOpened } from "./data.js";
 import { openUrl, facts, orchestratorsOf, orchestratorState, agentStatus, workersOf, captainOf, focusAgent, focusWithPane, currentAgent, adrift, agentNames } from "./live.js";
-import { programIcon, plural, runName } from "./ui.js";
+import { programIcon, plural, runName, oneoffTag } from "./ui.js";
 import { startedTip } from "./context.js";
 import { liveUsage } from "./resources.js";
 import { attentionOf } from "./attend.js";
@@ -383,7 +383,7 @@ function needCard(m, x) {
           .when(Boolean(x.term), (el) => el.cursor_pointer().on_click(focus))
           .tooltip([name.tip ?? name.title, startedTip(r.started), newDecisionsNote(r), x.term ? "Click to open its orchestrator" : null].filter(Boolean).join("\n"))
           .child(titleText(t, name, 12.5, true)))
-        .children([runTypeTag(t, r, id), ...levelTags(view, t, r, id, true)].filter(Boolean)))
+        .children([runTypeTag(t, r, id), r.oneoff && oneoffTag(t, r.oneoff, `${id}-oneoff`), ...levelTags(view, t, r, id, true)].filter(Boolean)))
       .child(div().id(`${id}-why`).min_w(0).truncate().text_size(11).text_color(color).tooltip(rowTip(x.a, now).join("\n")).child(lead)))
     .children(boxActions(m, x, f, items));
 }

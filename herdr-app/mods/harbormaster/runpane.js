@@ -4,7 +4,7 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, HoverCard } from "gpui-base";
 import { acceptProof, unacceptProof, overBudget, taskTone, oneWay, PR_TONE, markOpened } from "./data.js";
 import { facts, agentStatus, programOf, paneBeside, togglePin, focusAgent, openUrl, closeOwnPane } from "./live.js";
-import { OCTOPUS, programIcon, plural, ago, shortRef, runName, withTip, typeTag, TYPE } from "./ui.js";
+import { OCTOPUS, programIcon, plural, ago, shortRef, runName, withTip, typeTag, oneoffTag, TYPE } from "./ui.js";
 import { tokenText, tokenDetail, startedTip, runAgeText } from "./context.js";
 import { liveUsage } from "./resources.js";
 import { claimCounts, claimsVerdict, claimResultLine, claimPill, claimActions, checksLine, reviewedLine, worthALook, hasClaims } from "./claims.js";
@@ -14,7 +14,7 @@ import { stepText, quietText, flowState, ciState } from "./attention.js";
 import { mergePath } from "./mergepath.js";
 import { paneSections, agentsSummary, auditDecisions } from "./paneorder.js";
 import { newDecisions, newSinceText } from "./tell.js";
-import { reviewText, prStateText, prFacts } from "./prfacts.js";
+import { reviewText, prStateText, prFacts, noPrText } from "./prfacts.js";
 import { decisionsSeen, markDecisionsSeen } from "./telling.js";
 import { workerTree } from "./crewrows.js";
 import { askedLevel } from "./inbox.js";
@@ -32,6 +32,7 @@ export function cardHeader(view, t, r, f, meta, lead = null) {
       .child(h_flex().gap(6).items_center().min_w(0)
         .child(withTip(div().id(`title-${r.key}`).truncate().font_semibold().text_size(TYPE.title).text_color(t.foreground), runName(r.branch, r.topic)))
         .when(Boolean(r.type), (el) => el.child(runTypeTag(t, r, r.key)))
+        .when(Boolean(r.oneoff), (el) => el.child(oneoffTag(t, r.oneoff, `oneoff-${r.key}`, T(10, "meta"))))
         .children(levelTags(view, t, r, r.key, false, f.closed))
         .when(Boolean(r.machine), (el) => el.child(div().flex_none().text_size(TYPE.meta).px(5).rounded(4).bg(t.raised).text_color(t.muted).child(r.machine))))
       .child(metaLine(t, r, meta, lead)))
@@ -141,7 +142,7 @@ export function pathInput(r, f, stages) {
 function pathStrip(view, t, r, f, stages) {
   // A stage opens the Claims section, which an old run without claims does not have, or the Tasks
   // section, which only has something to open while it is a single line.
-  const tasksFold = paneSections({ finished: isFinished(r) }).some((x) => x.key === "tasks" && x.compact) && (f.counts.planned > 0 || r.tasks.length > 0);
+  const tasksFold = !r.oneoff && paneSections({ finished: isFinished(r) }).some((x) => x.key === "tasks" && x.compact) && (f.counts.planned > 0 || r.tasks.length > 0);
   const stops = mergePath(pathInput(r, f, stages)).map((s) => (s.fold === "claims" && !hasClaims(r) || s.fold === "tasks" && !tasksFold ? { ...s, fold: null } : s));
   const open = (fold) => { view.folds ??= new Map(); if (fold === "claims") view.folds.set(`pf-${r.key}`, true); if (fold === "tasks") view.folds.set(`tk-${r.key}`, true); };
   const part = (s) => {
@@ -188,6 +189,7 @@ export function claimsSummary(t, r, stages = null) {
   const color = { pass: PASS(t), fail: t.blocked, amber: AMBER(t), muted: t.muted, dim: t.dim };
   const paint = (p) => ({ text: p.text, bold: p.bold, color: p.tone ? color[p.tone] : null });
   if (!hasClaims(r)) {
+    if (r.oneoff) return null; // a one-off shows claims only when plan.md has them
     const red = r.proof.md?.checks?.state === "red" ? checksLine(r.proof.md) : null;
     return red ? { parts: [paint(red)], tip: red.tip } : null;
   }
@@ -607,12 +609,13 @@ function drawRunDetail(view, t, r, ctx) {
   // Who reviews means nothing before there is a PR to review: the toggle comes with the first. With
   // no PR it is one dim line, not a box.
   sections.set("prs", () => (prs.length === 0
-    ? div().text_size(TYPE.meta).text_color(t.dim).child(r.phase === "finished" ? "None" : "No pull request yet")
+    ? div().text_size(TYPE.meta).text_color(t.dim).child(noPrText(r))
     : section(t, `Pull requests · ${prs.length}`, prs.map((p, i) => prDetail(t, p, i, false, Boolean(r.away))), r.away || flowInBox ? null : flowToggle(t, r, `pane-${r.key}`))));
   if (r.issues.length + related.length > 0) sections.set("issues", () => section(t, "Issues and related PRs", [
     ...r.issues.map((url) => issueRow(t, url)), ...related.map((p, i) => prDetail(t, p, i, true, Boolean(r.away)))]));
-  if (hasClaims(r) || r.proof.md?.checks || r.proof.md?.reviewed?.length) sections.set("claims", () => claimsSection(view, t, r, stages));
-  if (counts.planned > 0 || r.tasks.length > 0) sections.set("tasks", (compact) => {
+  // A one-off has claims only when its plan.md has a `## Claims`.
+  if (hasClaims(r) || !r.oneoff && (r.proof.md?.checks || r.proof.md?.reviewed?.length)) sections.set("claims", () => claimsSection(view, t, r, stages));
+  if (!r.oneoff && (counts.planned > 0 || r.tasks.length > 0)) sections.set("tasks", (compact) => {
     const key = `tk-${r.key}`;
     const strip = div().pb(2).child(taskStrip(t, r, counts, stages, false));
     if (!compact) return section(t, "Tasks", [strip], tasksText(r, counts, stages));

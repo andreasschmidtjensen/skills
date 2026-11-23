@@ -284,3 +284,27 @@ test("a Review of this machine's checkout never lands on another machine's folde
   assert.equal(list[1].machine, null);
   assert.equal(withFolder([far], "/home/u/api", "desk").length, 1);
 });
+
+test("a one-off: Where pills (checkout by default), the prompt carries where, and where is remembered", async () => {
+  globalThis.__herdrProps = { role: "newrun", kind: "oneoff", overlay: "ov1" };
+  const view = {};
+  let prompt = null;
+  globalThis.__herdrWrite = async (path, body) => { if (path.includes(".newrun-")) prompt = body; };
+  initNewRun(view, callCx());
+  const nr = view.nr;
+  nr.entries = [noSpace]; nr.folder = noSpace; nr.shown = noSpace.folder; nr.where.set_value(noSpace.folder);
+  nr.text.set_value("fix the typo");
+  assert.equal(nr.at, "checkout");
+  assert.ok(find(newRunView(view, T), "nr-w-checkout") && find(newRunView(view, T), "nr-w-worktree"), "both pills");
+  assert.equal(find(newRunView(dialog(noSpace), T), "nr-w-worktree"), null, "only for a one-off");
+  find(newRunView(view, T), "nr-w-worktree").click({}, callCx());
+  clickStart(view);
+  await settle();
+  assert.deepEqual(rejections, []);
+  const run = execs.find(([cmd]) => cmd === "bash");
+  assert.ok(run, "start-agent.sh ran");
+  delete globalThis.__herdrWrite;
+  assert.match(prompt, /^\/herdr-app-orchestrator oneoff where=worktree autonomy=L1 fix the typo\n$/);
+  await settle();
+  assert.match(execs.map((e) => e.join(" ")).join("\n"), /newrun\.json/, "prefs saved");
+});
