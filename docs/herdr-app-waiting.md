@@ -6,9 +6,9 @@ Waiting is a Herdr app mod. It lists every plain terminal (not an agent, not a h
 
 - **Finished.** A command ran for 10 seconds or more and the shell is back in front. It stays until you focus the terminal.
 - **Exited.** Only for a terminal Herdr still lists after its process exited (one kept by `hc run --keep` or started outside a pane). Herdr closes the pane and tab of a terminal whose program exits, so an ordinary exited shell leaves nothing to jump to and is not listed.
-- **Needs input.** A program that is not a shell has had the same screen for 5 seconds, uses about no CPU (under 1%), and its last non-empty line looks like a prompt: it ends in `?`, `:` or `>`, ends in `[y/N]` or `(yes/no)`, or contains `password`, `passphrase` or `continue`. This is a heuristic: it can miss a prompt and it can flag a line that only looks like one.
+- **Needs input.** A program that is not a shell has had the same screen for 5 seconds, uses little CPU (under 10%), and its last non-empty line looks like a prompt: it ends in `?`, `:` or `>`, ends in `[y/N]` or `(yes/no)`, or contains `password`, `passphrase` or `continue`. This is a heuristic: it can miss a prompt and it can flag a line that only looks like one.
 - **Quiet.** A program that is not a shell has had the same screen for 60 seconds or more and no prompt-looking last line. It is listed greyed under **Quiet** and is not counted.
-- **REPL and pager guard.** The screen a program shows when Waiting first sees it, and the screen you leave behind when you focus it, never count as needs-input or quiet. A REPL or pager you left open stays out of the list until its screen changes.
+- **REPL and pager guard.** Pagers (`less`, `more`, `most`, `man`) and REPLs (`python`, `python3`, `node`, `psql`, `mysql`, `sqlite3`, `irb`, `ghci`, `iex`, `redis-cli`, `lua`) started with no script or file (only flags) are listed as running, never needs-input or quiet. A REPL given a script, `-c`, `-m` or `-e` (such as `python3 playbook.py`) is not one, so its prompts count. The screen you leave behind when you focus any terminal stays out of the list until it changes.
 - **Focusing clears.** Focusing a terminal clears its mark. The terminal you are in is never listed.
 
 ## Keys
@@ -38,7 +38,7 @@ It is `{ "mod": "waiting", "props": { "role": "list" } }` with weight 0.5; to us
 ## Known limits
 
 - `waiting.next` and the counting need the list (or badge) block shown: that copy is what polls and what receives `cmd-j`. With a collapsed sidebar, or a layout without the block, `cmd-j` does nothing. `cmd-shift-j` still works: the picker copy polls too (the shared lock lets one copy poll at a time), so its list is current without the block.
-- Cost: one `ps` per machine per poll (2 s) for the foreground pids of non-shell terminals. A terminal's screen is read (`hc read`) only while its CPU is under 1 %; once its screen has been unchanged for 5 s and classified, it is read every 10 s instead of every 2 s.
+- Cost: one `ps` per machine per poll (2 s) for the CPU and command line of the foreground pids of non-shell terminals. A terminal's screen is read (`hc read`) only while its CPU is under 10 %; once its screen has been unchanged for 5 s and classified, it is read every 10 s instead of every 2 s.
 - Needs input is a guess from the screen, the CPU and the last line. Remote terminals are read through the terminal's own machine (its CPU, via `hc`), so they follow what that machine answers.
 - Marks live in the mod's memory. Reloading the mod resets them.
 

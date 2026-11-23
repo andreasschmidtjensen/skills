@@ -15,7 +15,7 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { exec, terminals, spaces, panes, focused, run, theme, props, nextCommand, openOverlay, closeOverlay, shared, setShared } from "herdr";
-import { isPlain, isShell, parsePs, needsScreen, track, markSeen, waitingList, allRows, count, screenSig, lastLine } from "./rules.js";
+import { isPlain, isShell, parsePsArgs, needsScreen, track, markSeen, waitingList, allRows, count, screenSig, lastLine } from "./rules.js";
 import { POLL_MS, rowParts, listHeader, listRow, groupBySpace, pickNext, moveAt, lockHeld, whereIs } from "./view.js";
 
 const LIST = "waiting.list", ALL = "waiting.all", COUNT = "waiting.count", LOCK = "waiting.lock", POPUP = "waiting.popup";
@@ -27,7 +27,7 @@ let LAST = "", LAST_ALL = ""; // the published lists as JSON, to write shared st
 
 const machineOf = (t) => (String(t.address).includes("/") ? String(t.address).split("/")[0] : null);
 
-// One ps per machine for all candidate pids: address -> cpu %. A pid ps does not know simply has no entry.
+// One ps per machine for all candidate pids: address -> { cpu %, args }. A pid ps does not know simply has no entry.
 async function cpuOf(terms) {
   const byMachine = new Map();
   for (const t of terms) {
@@ -39,10 +39,10 @@ async function cpuOf(terms) {
   const out = new Map();
   await Promise.all([...byMachine].map(async ([k, ts]) => {
     // The foreground pid belongs to the terminal's machine: look it up there, not here.
-    const ps = await exec("ps", ["-o", "pid=,%cpu=", "-p", ts.map((t) => t.foreground.pid).join(",")], k ? { on: k } : undefined).catch(() => null);
+    const ps = await exec("ps", ["-o", "pid=,%cpu=,args=", "-p", ts.map((t) => t.foreground.pid).join(",")], k ? { on: k } : undefined).catch(() => null);
     if (!ps) return; // ps exits 1 when some pid is gone but still prints the others
-    const cpus = parsePs(ps.stdout);
-    for (const t of ts) if (cpus.has(Number(t.foreground.pid))) out.set(t.address, cpus.get(Number(t.foreground.pid)));
+    const info = parsePsArgs(ps.stdout);
+    for (const t of ts) if (info.has(Number(t.foreground.pid))) out.set(t.address, info.get(Number(t.foreground.pid)));
   }));
   return out;
 }
@@ -62,10 +62,11 @@ async function pollOnce() {
   const cpus = await cpuOf(cands);
   const samples = new Map();
   await Promise.all(cands.map(async (t) => {
-    const cpu = cpus.get(t.address) ?? null;
-    if (!needsScreen(t, MEM, now, cpu)) { if (cpu != null) samples.set(t.address, { cpu }); return; }
+    const info = cpus.get(t.address);
+    const cpu = info?.cpu ?? null, args = info?.args ?? null;
+    if (!needsScreen(t, MEM, now, cpu, args)) { if (cpu != null) samples.set(t.address, { cpu, args }); return; }
     const s = await screenOf(t);
-    samples.set(t.address, s ? { ...s, cpu } : cpu != null ? { cpu } : null);
+    samples.set(t.address, s ? { ...s, cpu, args } : cpu != null ? { cpu, args } : null);
   }));
   const next = {};
   for (const t of plain) next[t.address] = track(MEM[t.address], t, now, samples.get(t.address) ?? null);
