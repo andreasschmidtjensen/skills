@@ -178,3 +178,16 @@ test("install: a calm main with the #51 picker gets Herdr's Spaces block in its 
   assert.deepEqual(after[3].content, { mod: "spaces" });
   assert.doesNotMatch(s.run(), /replaced the Spaces picker/);
 });
+
+test("install: a Waiting badge the user removed is not added back by a later install", () => {
+  const s = sandbox();
+  s.run();
+  const main = s.read("harbormaster-main.json");
+  assert.ok(ids(main).includes("waiting"));
+  const col = all(main).find((n) => n.children?.some((c) => c.id === "waiting"));
+  col.children = col.children.filter((c) => c.id !== "waiting");
+  writeFileSync(s.file("harbormaster-main.json"), JSON.stringify(main));
+  const bytes = readFileSync(s.file("harbormaster-main.json"), "utf8");
+  s.run();
+  assert.equal(readFileSync(s.file("harbormaster-main.json"), "utf8"), bytes);
+});

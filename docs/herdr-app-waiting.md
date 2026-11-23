@@ -28,12 +28,13 @@ A one-row block `Waiting · n` sits under Herdr's Spaces list in `harbormaster-m
 
 `herdr-app/install.sh` (see [docs/herdr-app-harbormaster.md](herdr-app-harbormaster.md#install)) also:
 - copies `herdr-app/mods/waiting` into the app's home. It refuses to replace a `mods/waiting` whose `mod.json` title is not `Waiting`.
-- adds the badge block to the column of `harbormaster-main` that holds the Crew block, once. A layout that already has a Waiting block is left alone.
+- adds the badge block to the column of `harbormaster-main` that holds the Crew block, only on the run that first installs `mods/waiting`. Re-running install does not bring back a badge you removed. A layout that already has a Waiting block is left alone.
 - adds the two keys as above.
 
 ## Known limits
 
-- `waiting.next` and the counting need the badge shown: the badge copy is what polls and what receives `cmd-j`. With a collapsed sidebar, or a layout without the badge block, `cmd-j` does nothing. `cmd-shift-j` still works.
+- `waiting.next` and the counting need the badge shown: the badge copy is what polls and what receives `cmd-j`. With a collapsed sidebar, or a layout without the badge block, `cmd-j` does nothing. `cmd-shift-j` still works: the picker copy polls too (the shared lock lets one copy poll at a time), so its list is current without the badge.
+- Cost: one `ps` per machine per poll (2 s) for the foreground pids of non-shell terminals. A terminal's screen is read (`hc read`) only while its CPU is under 1 %; once its screen has been unchanged for 5 s and classified, it is read every 10 s instead of every 2 s.
 - Needs input is a guess from the screen, the CPU and the last line. Remote terminals are read through the terminal's own machine (its CPU, via `hc`), so they follow what that machine answers.
 - Marks live in the mod's memory. Reloading the mod resets them.
 

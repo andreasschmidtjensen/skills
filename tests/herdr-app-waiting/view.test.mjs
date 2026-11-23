@@ -27,6 +27,14 @@ test("groupBySpace keeps list order and splits on space change", () => {
   const g = groupBySpace([{ space: "a", address: "1" }, { space: "a", address: "2" }, { space: "b", address: "3" }]);
   assert.deepEqual(g.map((x) => [x.space, x.rows.length]), [["a", 2], ["b", 1]]);
   assert.deepEqual(groupBySpace(null), []);
+  const n = groupBySpace([{ space: "s7", spaceName: "api", address: "1" }]);
+  assert.deepEqual([n[0].space, n[0].name], ["s7", "api"], "header shows the name, falls back to the id");
+  assert.equal(groupBySpace([{ space: "s8", address: "1" }])[0].name, "s8");
+});
+
+test("rowParts: where shows the tab name, not the id", () => {
+  assert.equal(rowParts({ kind: "finished", command: "make", tab: "tb4", tabName: "build", since: 0, address: "t1" }, 0).where, "build");
+  assert.equal(rowParts({ kind: "finished", command: "make", tab: "tb4", tabName: "2", title: "zsh", since: 0, address: "t1" }, 0).where, "zsh");
 });
 
 test("pickNext: first counted entry, skipping quiet; after the focused one with wrap", () => {

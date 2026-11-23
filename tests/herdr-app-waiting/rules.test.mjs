@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  MIN_RUN_MS, QUIET_MS, QUIET_LIST_MS, STALE_MS, track, markSeen, waitingList, count, needsScreen, looksLikePrompt, lastLine, screenSig,
+  MIN_RUN_MS, QUIET_MS, QUIET_LIST_MS, STALE_MS, track, markSeen, waitingList, count, needsScreen, parsePs, CPU_QUIET, SETTLED_EVERY_MS, SAMPLE_EVERY_MS, looksLikePrompt, lastLine, screenSig,
 } from "../../herdr-app/mods/waiting/rules.js";
 
 const S = 1000;
@@ -221,4 +221,55 @@ test("a REPL already open when tracking began stays quiet", () => {
   let m = track(undefined, py, 0, { sig: "R", cpu: 0, line: ">>>" });
   m = track(m, py, 60000, { sig: "R", cpu: 0, line: ">>>" });
   assert.equal(m.needs ?? null, null);
+});
+
+test("waitingList: ids rank and group, names come from the maps (ids differ from names)", () => {
+  const mk = (a, sp, tb) => busy({ address: a, labels: { "herdr.space": sp, "herdr.tab": tb } });
+  const a = mk("t1", "s9", "tb1"), b = mk("t2", "s2", "tb2"), c = mk("t3", "s5", "tb3");
+  let M = {};
+  for (const [i, x] of [a, b, c].entries()) M[x.address] = track(undefined, x, t0 + i);
+  for (const x of [a, b, c]) M[x.address] = track(M[x.address], term({ address: x.address, labels: x.labels }), t0 + MIN_RUN_MS + 5);
+  const l = waitingList(M, [a, b, c].map((x) => term({ address: x.address, labels: x.labels })), {
+    currentSpace: "s5", spaceOrder: ["s2", "s5", "s9"],
+    spaceNames: { s5: "api", s2: "web", s9: "ops" }, tabNames: { tb3: "build", tb2: "2", tb1: "logs" }, now: t0 + MIN_RUN_MS + 6,
+  });
+  assert.deepEqual(l.map((e) => [e.space, e.spaceName, e.tab, e.tabName]),
+    [["s5", "api", "tb3", "build"], ["s2", "web", "tb2", "2"], ["s9", "ops", "tb1", "logs"]], "current space first, then spaceOrder");
+});
+
+test("waitingList: a remote terminal's labels get the machine prefix", () => {
+  const r = busy({ address: "box/t7", labels: { "herdr.space": "s1", "herdr.tab": "tb1" } });
+  const M = { "box/t7": track(undefined, r, t0) };
+  const rs = term({ address: "box/t7", labels: { "herdr.space": "s1", "herdr.tab": "tb1" } });
+  M["box/t7"] = track(M["box/t7"], rs, t0 + MIN_RUN_MS);
+  const l = waitingList(M, [rs], { currentSpace: "box/s1", spaceNames: { "box/s1": "remote" }, now: t0 + MIN_RUN_MS });
+  assert.deepEqual([l[0].space, l[0].tab, l[0].spaceName], ["box/s1", "box/tb1", "remote"]);
+});
+
+test("parsePs reads pid and cpu lines, skips junk", () => {
+  const m = parsePs("  123  0.0\n 4567 12.5\nbad line\n");
+  assert.deepEqual([...m], [[123, 0], [4567, 12.5]]);
+  assert.equal(parsePs(null).size, 0);
+});
+
+test("needsScreen gating: busy cpu skips the read; settled screens back off to 10 s", () => {
+  assert.equal(needsScreen(busy(), {}, t0, CPU_QUIET), false, "cpu at the threshold is busy");
+  assert.equal(needsScreen(busy(), {}, t0, 40), false);
+  assert.equal(needsScreen(busy(), {}, t0, 0.2), true, "quiet cpu, no sample yet");
+  assert.equal(needsScreen(busy(), {}, t0, null), true, "unknown cpu falls back to reading");
+  const fresh = { t4h: { sig: "A", sigSince: t0, sampleAt: t0 + S } }; // read < QUIET_MS after the change: not yet classified
+  assert.equal(needsScreen(busy(), fresh, t0 + S + SAMPLE_EVERY_MS, 0), true);
+  const settled = { t4h: { sig: "A", sigSince: t0, sampleAt: t0 + QUIET_MS } };
+  assert.equal(needsScreen(busy(), settled, t0 + QUIET_MS + SAMPLE_EVERY_MS, 0), false, "settled: wait 10 s");
+  assert.equal(needsScreen(busy(), settled, t0 + QUIET_MS + SETTLED_EVERY_MS, 0), true);
+});
+
+test("a cpu-only sample while busy resets the screen baseline and hides needs-input", () => {
+  const b = busy();
+  let m = run([[b, t0, sm("A", "compiling", 0)], [b, t0 + S, sm("P", "Continue?", 0)], [b, t0 + S + QUIET_MS, sm("P", "Continue?", 0)]]);
+  assert.equal(waitingList(mem(m), [b], { now: t0 + S + QUIET_MS })[0].kind, "needs-input");
+  m = track(m, b, t0 + QUIET_MS + 2 * S, { cpu: 50 });
+  assert.deepEqual(waitingList(mem(m), [b], { now: t0 + QUIET_MS + 2 * S }), []);
+  assert.equal(m.sig, null);
+  assert.equal(m.sigSince, null);
 });

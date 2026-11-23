@@ -5,7 +5,8 @@ export const QUIET_MS = 5000;
 export const QUIET_LIST_MS = 60000;
 export const CPU_QUIET = 1;
 export const SAMPLE_EVERY_MS = 2000; // re-read a non-shell terminal's screen at most this often
-export const STALE_MS = 6000; // needs-input/quiet only count from a sample this fresh
+export const SETTLED_EVERY_MS = 10000; // ... and this often once its screen is unchanged and already classified
+export const STALE_MS = 14000; // needs-input/quiet only count from a sample this fresh (> SETTLED_EVERY_MS + a poll)
 
 const SHELLS = /^-?(zsh|bash|sh|fish|dash|ksh|nu|tcsh|csh)$/;
 
@@ -40,7 +41,22 @@ export const isShell = (term) => {
   return !name || SHELLS.test(name);
 };
 
-const spaceOf = (term) => term.labels?.["herdr.space"] ?? "";
+const machineOf = (address) => (String(address).includes("/") ? String(address).split("/")[0] : null);
+
+// Labels hold ids local to the terminal's machine; the ids the app shows for a remote machine carry "<machine>/".
+const qualify = (term, id) => (id ? (machineOf(term.address) ? `${machineOf(term.address)}/${id}` : id) : "");
+const spaceOf = (term) => qualify(term, term.labels?.["herdr.space"]);
+const tabOf = (term) => qualify(term, term.labels?.["herdr.tab"]);
+
+// ps output "pid cpu" per line -> Map pid -> cpu %. Lines that don't parse are skipped.
+export const parsePs = (text) => {
+  const out = new Map();
+  for (const line of String(text ?? "").split("\n")) {
+    const m = line.trim().match(/^(\d+)\s+([\d.]+)$/);
+    if (m) out.set(Number(m[1]), parseFloat(m[2]));
+  }
+  return out;
+};
 
 // New per-terminal memory. sample = { sig, cpu, line } (screen signature, cpu %, last non-empty line) or null.
 // Contract: the mod supplies cpu with every sample (read with ps); terminals() has none. Without cpu, needs-input never fires.
@@ -68,6 +84,11 @@ export const track = (prev, term, now, sample = null) => {
   // screen as the quiet baseline; one started while tracked has none, so a prompt it shows at once counts.
   if (!m.fg) { m.fg = { name, since: now, preexisting: fresh }; m.sig = null; m.sigSince = null; m.needs = null; m.sampleAt = null; m.quietSig = null; }
   else if (name) m.fg = { ...m.fg, name };
+  if (sample && sample.sig == null && sample.cpu != null) {
+    // Only the CPU was read (no screen read while it is busy or the last read is recent).
+    m.cpu = sample.cpu;
+    if (m.cpu >= CPU_QUIET) { m.sig = null; m.sigSince = null; m.needs = null; m.sampleAt = null; m.line = ""; }
+  }
   if (sample && sample.sig != null) {
     if (m.quietSig == null && m.fg.preexisting && m.sampleAt == null) m.quietSig = sample.sig;
     m.sampleAt = now;
@@ -105,15 +126,19 @@ const entryOf = (term, m, now) => {
   return m.mark?.kind === "finished" ? { kind: "finished", since: m.mark.since, command: m.mark.command } : null;
 };
 
-// opts: { currentSpace, spaceOrder, focused (address), now }. Flat list, contiguous by space.
+// opts: { currentSpace (id), spaceOrder (ids), spaceNames / tabNames (id -> display name), focused (address), now }.
+// Flat list, contiguous by space. Entries carry space/tab ids and spaceName/tabName for display.
 export const waitingList = (memory, terms, opts = {}) => {
-  const { currentSpace = null, spaceOrder = [], focused = null, now = null } = opts;
+  const { currentSpace = null, spaceOrder = [], spaceNames = {}, tabNames = {}, focused = null, now = null } = opts;
   const out = [];
   for (const term of terms ?? []) {
     const m = memory?.[term.address];
     if (!m || m.ignored || !isPlain(term) || term.address === focused) continue;
     const e = entryOf(term, m, now);
-    if (e) out.push({ address: term.address, space: spaceOf(term), tab: term.labels?.["herdr.tab"] ?? "", title: term.title ?? "", ...e });
+    if (e) {
+      const space = spaceOf(term), tab = tabOf(term);
+      out.push({ address: term.address, space, tab, spaceName: spaceNames[space] ?? space, tabName: tabNames[tab] ?? tab, title: term.title ?? "", ...e });
+    }
   }
   const rank = (s) => {
     if (s === currentSpace) return -1;
@@ -127,9 +152,15 @@ export const waitingList = (memory, terms, opts = {}) => {
 
 export const count = (list) => list.filter((e) => e.kind !== "quiet").length;
 
-// Only non-shell foregrounds are sampled, and only when there is no sample yet or the last one is SAMPLE_EVERY_MS old.
-export const needsScreen = (term, memory, now) => {
+// Only non-shell foregrounds are sampled. cpu (%, or null when unknown) comes from one ps per machine: a program
+// that is using the CPU is not waiting, so its screen is not read. Otherwise read when there is no sample yet or the
+// last is SAMPLE_EVERY_MS old; every SETTLED_EVERY_MS once the screen has been unchanged for QUIET_MS and was classified.
+export const needsScreen = (term, memory, now, cpu = null) => {
   if (!isPlain(term) || term.state === "finished" || isShell(term)) return false;
-  const at = memory?.[term.address]?.sampleAt;
-  return at == null || now - at >= SAMPLE_EVERY_MS;
+  if (cpu != null && cpu >= CPU_QUIET) return false;
+  const m = memory?.[term.address];
+  const at = m?.sampleAt;
+  if (at == null) return true;
+  const settled = m.sig != null && m.sigSince != null && at - m.sigSince >= QUIET_MS;
+  return now - at >= (settled ? SETTLED_EVERY_MS : SAMPLE_EVERY_MS);
 };

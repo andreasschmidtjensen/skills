@@ -44,6 +44,7 @@ cp "$here"/mods/harbormaster/*.js "$here"/mods/harbormaster/*.svg "$here"/mods/h
   "$here"/mods/harbormaster/timing.sh "$here"/mods/harbormaster/categories.tsv "$home/mods/harbormaster/"
 cp "$here"/layouts/harbormaster-sea.json "$here"/layouts/harbormaster-sea.svg "$home/layouts/"
 echo "installed mods/harbormaster and the harbormaster-sea layout"
+waiting_new=0; [ -e "$home/mods/waiting" ] || waiting_new=1 # the badge is added only on a first install
 mkdir -p "$home/mods/waiting"
 cp "$here"/mods/waiting/*.js "$here"/mods/waiting/mod.json "$home/mods/waiting/"
 echo "installed mods/waiting"
@@ -112,20 +113,27 @@ if [ -f "$main" ] && jq -e "$picker" "$main" >/dev/null 2>&1; then
 fi
 
 # 2c. The Waiting badge: one row under Herdr's Spaces list, in the column that holds the
-#     Crew block. Once: a layout that has a Waiting block already (or has no Crew column)
-#     is left alone.
+#     Crew block. Only when mods/waiting was not installed before this run (so a badge the user
+#     removed stays removed), and a layout that has a Waiting block already (or has no Crew
+#     column) is left alone.
 badge='[.. | objects | select(.content.mod? == "waiting")] | length > 0'
-if [ -f "$main" ] && ! jq -e "$badge" "$main" >/dev/null 2>&1; then
+if [ "$waiting_new" = 1 ] && [ -f "$main" ] && ! jq -e "$badge" "$main" >/dev/null 2>&1; then
   tmp=$(mktemp)
-  jq '
+  if jq '
     def badge: {"id": "waiting", "type": "block", "content": {"mod": "waiting", "props": {"role": "badge"}}, "size": {"px": 28}};
     (first(paths(type == "object" and (.children? | type) == "array" and any(.children[]; .content.mod? == "harbormaster" and .content.props.role? == "crew"))) // null) as $p
     | if $p == null then . else
         (getpath($p).children | (map(.content.mod? == "spaces") | index(true))) as $i
         | if $i == null then getpath($p).children += [badge]
           else setpath($p + ["children"]; getpath($p).children[: $i + 1] + [badge] + getpath($p).children[$i + 1 :]) end
-      end' "$main" > "$tmp"
-  if jq -e "$badge" "$tmp" >/dev/null 2>&1; then
+      end' "$main" > "$tmp"; then
+    jqok=1
+  else
+    jqok=0
+  fi
+  if [ "$jqok" = 0 ]; then
+    echo "install.sh: could not read harbormaster-main (jq failed); Waiting badge not added" >&2
+  elif jq -e "$badge" "$tmp" >/dev/null 2>&1; then
     cat "$tmp" > "$main"
     echo "added the Waiting badge to harbormaster-main"
   else

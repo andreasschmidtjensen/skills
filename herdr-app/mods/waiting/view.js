@@ -23,7 +23,8 @@ const KINDS = {
 export const rowParts = (e, now) => {
   const k = KINDS[e.kind] ?? KINDS.quiet;
   const word = e.kind === "exited" && e.exit_code != null ? `exited ${e.exit_code}` : k.word;
-  const where = e.tab && !/^\d+$/.test(e.tab) ? e.tab : e.cwd || e.title || "";
+  const tab = e.tabName ?? e.tab;
+  const where = tab && !/^\d+$/.test(tab) ? tab : e.cwd || e.title || "";
   return { icon: k.icon, word, tone: k.tone, dim: e.kind === "quiet", name: e.command || e.title || e.address, where, age: ageText(now - e.since) };
 };
 
@@ -33,7 +34,7 @@ export const groupBySpace = (list) => {
   for (const e of list ?? []) {
     const last = out[out.length - 1];
     if (last && last.space === e.space) last.rows.push(e);
-    else out.push({ space: e.space, rows: [e] });
+    else out.push({ space: e.space, name: e.spaceName ?? e.space, rows: [e] });
   }
   return out;
 };

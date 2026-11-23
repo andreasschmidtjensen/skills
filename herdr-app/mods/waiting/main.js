@@ -1,19 +1,19 @@
 // The waiting mod: plain (non-agent) terminals that wait on you, across spaces.
 // props().role picks the view:
 //   "badge"            one row "Waiting · n" for the sidebar; a click opens the picker. Polls and hears the keys' commands.
-//   "picker" (overlay) the list, grouped by space; ↑/↓ and Enter focus, Esc closes.
+//   "picker" (overlay) the list, grouped by space; ↑/↓ and Enter focus, Esc closes. An overlay copy with no role is the picker.
 // Keys (keys.json): "cmd-shift-j": "mod.open:waiting" opens the picker (mod.json's popup; needs no listener),
 // "cmd-j": "waiting.next" focuses the next waiting terminal. A "waiting.picker" command also toggles the list.
 // Known limit: "waiting.<command>" reaches shown copies only (AGENTS.md), so "next" needs the badge (or the picker) on screen:
 // with the sidebar collapsed or a layout without the badge block it does nothing.
-// Only one copy polls (the shared lock); it publishes the list as shared "waiting.list" and the count as "waiting.count",
+// Every copy tries to poll, but only one holds the shared lock (the picker polls too, so it is fresh without the badge); it publishes the list as shared "waiting.list" and the count as "waiting.count",
 // each only when it changes.
 // Rules live in rules.js, the pure view/command helpers in view.js.
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { exec, terminals, spaces, panes, focused, run, theme, props, nextCommand, openOverlay, closeOverlay, shared, setShared } from "herdr";
-import { isPlain, needsScreen, track, markSeen, waitingList, count, screenSig, lastLine } from "./rules.js";
+import { isPlain, isShell, parsePs, needsScreen, track, markSeen, waitingList, count, screenSig, lastLine } from "./rules.js";
 import { POLL_MS, rowParts, groupBySpace, pickNext, moveAt, lockHeld, whereIs } from "./view.js";
 
 const LIST = "waiting.list", COUNT = "waiting.count", LOCK = "waiting.lock", POPUP = "waiting.popup";
@@ -23,26 +23,47 @@ const LIST = "waiting.list", COUNT = "waiting.count", LOCK = "waiting.lock", POP
 let MEM = {}; // address -> rules.js memory
 let LAST = ""; // the published list as JSON, to write shared state only when it changes
 
-async function sampleOf(term) {
-  // The foreground pid belongs to the terminal's machine ("machine/tN"): look it up there, not here.
-  const machine = String(term.address).includes("/") ? String(term.address).split("/")[0] : null;
-  const [screen, ps] = await Promise.all([
-    exec("hc", ["read", "--lines", "0", term.address]).catch(() => null),
-    exec("ps", ["-o", "%cpu=", "-p", String(term.foreground?.pid ?? "")], machine ? { on: machine } : undefined).catch(() => null),
-  ]);
+const machineOf = (t) => (String(t.address).includes("/") ? String(t.address).split("/")[0] : null);
+
+// One ps per machine for all candidate pids: address -> cpu %. A pid ps does not know simply has no entry.
+async function cpuOf(terms) {
+  const byMachine = new Map();
+  for (const t of terms) {
+    if (t.foreground?.pid == null) continue;
+    const k = machineOf(t) ?? "";
+    if (!byMachine.has(k)) byMachine.set(k, []);
+    byMachine.get(k).push(t);
+  }
+  const out = new Map();
+  await Promise.all([...byMachine].map(async ([k, ts]) => {
+    // The foreground pid belongs to the terminal's machine: look it up there, not here.
+    const ps = await exec("ps", ["-o", "pid=,%cpu=", "-p", ts.map((t) => t.foreground.pid).join(",")], k ? { on: k } : undefined).catch(() => null);
+    if (!ps) return; // ps exits 1 when some pid is gone but still prints the others
+    const cpus = parsePs(ps.stdout);
+    for (const t of ts) if (cpus.has(Number(t.foreground.pid))) out.set(t.address, cpus.get(Number(t.foreground.pid)));
+  }));
+  return out;
+}
+
+// The screen is read only for a terminal whose CPU is quiet (rules.needsScreen).
+async function screenOf(term) {
+  const screen = await exec("hc", ["read", "--lines", "0", term.address]).catch(() => null);
   if (!screen || screen.code !== 0) return null;
-  const cpu = ps && ps.code === 0 ? parseFloat(ps.stdout) : NaN;
-  return { sig: screenSig(screen.stdout), cpu: Number.isFinite(cpu) ? cpu : null, line: lastLine(screen.stdout) };
+  return { sig: screenSig(screen.stdout), line: lastLine(screen.stdout) };
 }
 
 async function pollOnce() {
   const now = Date.now();
   const all = terminals();
   const plain = all.filter(isPlain);
+  const cands = plain.filter((t) => t.state !== "finished" && !isShell(t));
+  const cpus = await cpuOf(cands);
   const samples = new Map();
-  await Promise.all(plain.filter((t) => needsScreen(t, MEM, now)).map(async (t) => {
-    const s = await sampleOf(t);
-    if (s) samples.set(t.address, s);
+  await Promise.all(cands.map(async (t) => {
+    const cpu = cpus.get(t.address) ?? null;
+    if (!needsScreen(t, MEM, now, cpu)) { if (cpu != null) samples.set(t.address, { cpu }); return; }
+    const s = await screenOf(t);
+    samples.set(t.address, s ? { ...s, cpu } : cpu != null ? { cpu } : null);
   }));
   const next = {};
   for (const t of plain) next[t.address] = track(MEM[t.address], t, now, samples.get(t.address) ?? null);
@@ -50,9 +71,10 @@ async function pollOnce() {
   const f = focused();
   if (f?.terminal) MEM = markSeen(MEM, f.terminal, now);
   const ss = spaces();
+  const spaceNames = {}, tabNames = {};
+  for (const sp of ss) { spaceNames[sp.id] = sp.name; for (const tb of sp.tabs ?? []) tabNames[tb.id] = tb.name; }
   const list = waitingList(MEM, all, {
-    currentSpace: ss.find((s) => s.id === f?.space)?.name ?? null,
-    spaceOrder: ss.map((s) => s.name), focused: f?.terminal ?? null, now,
+    currentSpace: f?.space ?? null, spaceOrder: ss.map((s) => s.id), spaceNames, tabNames, focused: f?.terminal ?? null, now,
   });
   // Shared state is persisted and re-renders every mod: write it only when it changed.
   const json = JSON.stringify(list);
@@ -111,13 +133,20 @@ async function listen(cx) {
 
 export default class Waiting extends View {
   init(_props, cx) {
-    this.role = props()?.role ?? "badge";
+    // An overlay copy without a role (mod.open:waiting) is the picker.
+    this.role = props()?.role ?? (props()?.overlay ? "picker" : "badge");
     this.st = { me: `w${Math.random().toString(36).slice(2, 8)}`, polling: false }; // this copy's lock id
     this.handle = cx.focus_handle();
     this.at = 0;
-    if (this.role === "picker") { this.handle.focus(); cx.timer.after(300, () => this.handle.focus()); }
-    cx.timer.every(POLL_MS, (cx) => { if (this.role !== "picker") poll(this.st); cx.notify(); });
-    if (this.role !== "picker") poll(this.st);
+    if (this.role === "picker") {
+      this.handle.focus(); cx.timer.after(300, () => this.handle.focus());
+      // Known to the badge's toggle even when opened by mod.open (cmd-shift-j).
+      const id = props()?.overlay;
+      if (id && shared(POPUP)?.id !== id) setShared(POPUP, { id, at: Date.now(), open: true });
+    }
+    // Every copy polls; the shared lock lets one do it, so the picker stays fresh without the badge.
+    cx.timer.every(POLL_MS, (cx) => { poll(this.st); cx.notify(); });
+    poll(this.st);
     cx.spawn((cx) => listen(cx)); // the picker copy listens too, so "next" works while it is open
   }
 
@@ -167,7 +196,7 @@ export default class Waiting extends View {
     const sel = list[this.at];
     const kids = [];
     for (const g of groupBySpace(list)) {
-      kids.push(div().px(14).pt(8).pb(2).text_size(11).text_color(t.dim).child(g.space || "—"));
+      kids.push(div().px(14).pt(8).pb(2).text_size(11).text_color(t.dim).child(g.name || "—"));
       for (const e of g.rows) kids.push(this.renderRow(t, e, e === sel, now));
     }
     if (!list.length) kids.push(div().px(14).py(12).text_color(t.dim).child("Nothing is waiting for you."));
