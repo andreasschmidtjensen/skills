@@ -128,7 +128,7 @@ test("install: an older main (Crew above Agents) is upgraded in place, keeping t
   writeFileSync(s.file("harbormaster-main.json"), JSON.stringify(old));
   s.run();
   const main = s.read("harbormaster-main.json");
-  assert.deepEqual(main.children[0].children.map((c) => c.id), ["brand", "mine", "crew", "spaces", "waiting"]);
+  assert.deepEqual(main.children[0].children.map((c) => c.id), ["brand", "mine", "crew", "waiting", "spaces"]);
   assert.equal(main.children[0].children[2].content.props.needs, "box");
   const bytes = readFileSync(s.file("harbormaster-main.json"), "utf8");
   s.run();
@@ -187,6 +187,49 @@ test("install: a Waiting badge the user removed is not added back by a later ins
   const col = all(main).find((n) => n.children?.some((c) => c.id === "waiting"));
   col.children = col.children.filter((c) => c.id !== "waiting");
   writeFileSync(s.file("harbormaster-main.json"), JSON.stringify(main));
+  const bytes = readFileSync(s.file("harbormaster-main.json"), "utf8");
+  s.run();
+  assert.equal(readFileSync(s.file("harbormaster-main.json"), "utf8"), bytes);
+});
+
+const listBlock = { id: "waiting", type: "block", content: { mod: "waiting", props: { role: "list" } }, size: { weight: 0.5 } };
+
+test("install: a fresh main gets the Waiting list block just above Spaces", () => {
+  const s = sandbox();
+  s.run();
+  const col = s.read("harbormaster-main.json").children[0].children;
+  const i = col.findIndex((c) => c.id === "waiting");
+  assert.deepEqual(col[i], listBlock);
+  assert.equal(col[i + 1].content.mod, "spaces");
+});
+
+test("install: an earlier install's badge (under Spaces) becomes the list block above Spaces, once", () => {
+  const s = sandbox();
+  s.run();
+  const main = s.read("harbormaster-main.json");
+  const col = main.children[0].children;
+  const sp = col.findIndex((c) => c.id === "spaces");
+  col.splice(col.findIndex((c) => c.id === "waiting"), 1);
+  col.splice(col.findIndex((c) => c.id === "spaces") + 1, 0, { id: "waiting", type: "block", content: { mod: "waiting", props: { role: "badge" } }, size: { px: 28 } });
+  col.push(block("mine", "my-own-mod"));
+  assert.ok(sp >= 0);
+  writeFileSync(s.file("harbormaster-main.json"), JSON.stringify(main, null, 2) + "\n");
+  assert.match(s.run(), /moved the Waiting block/);
+  const after = s.read("harbormaster-main.json").children[0].children;
+  assert.deepEqual(after.map((c) => c.id), ["brand", "crew", "waiting", "spaces", "mine"]);
+  assert.deepEqual(after[2], listBlock);
+  assert.doesNotMatch(s.run(), /moved the Waiting block/);
+});
+
+test("install: a Waiting block the user made a list somewhere else stays where it is", () => {
+  const s = sandbox();
+  s.run();
+  const main = s.read("harbormaster-main.json");
+  const col = main.children[0].children;
+  const w = col.splice(col.findIndex((c) => c.id === "waiting"), 1)[0];
+  w.size = { weight: 2 };
+  col.push(w);
+  writeFileSync(s.file("harbormaster-main.json"), JSON.stringify(main, null, 2) + "\n");
   const bytes = readFileSync(s.file("harbormaster-main.json"), "utf8");
   s.run();
   assert.equal(readFileSync(s.file("harbormaster-main.json"), "utf8"), bytes);

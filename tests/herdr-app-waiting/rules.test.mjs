@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  MIN_RUN_MS, QUIET_MS, QUIET_LIST_MS, STALE_MS, track, markSeen, waitingList, count, needsScreen, parsePs, CPU_QUIET, SETTLED_EVERY_MS, SAMPLE_EVERY_MS, looksLikePrompt, lastLine, screenSig,
+  MIN_RUN_MS, QUIET_MS, QUIET_LIST_MS, STALE_MS, track, markSeen, waitingList, count, needsScreen, allRows, parsePs, CPU_QUIET, SETTLED_EVERY_MS, SAMPLE_EVERY_MS, looksLikePrompt, lastLine, screenSig,
 } from "../../herdr-app/mods/waiting/rules.js";
 
 const S = 1000;
@@ -272,4 +272,29 @@ test("a cpu-only sample while busy resets the screen baseline and hides needs-in
   assert.deepEqual(waitingList(mem(m), [b], { now: t0 + QUIET_MS + 2 * S }), []);
   assert.equal(m.sig, null);
   assert.equal(m.sigSince, null);
+});
+
+test("allRows: every live plain terminal, current space first, marks merged, agents left out", () => {
+  const a = term({ address: "t1", foreground: { name: "-zsh", pid: 1, cwd: "/home/u/proj/app" }, labels: { "herdr.space": "s1", "herdr.tab": "b1" } });
+  const b = busy({ address: "t2", labels: { "herdr.space": "s2", "herdr.tab": "b2" } });
+  const c = term({ address: "t3", status: "idle", labels: { "herdr.space": "s2", "herdr.tab": "b2" } }); // an agent
+  const d = term({ address: "t4", state: "finished", labels: { "herdr.space": "s2", "herdr.tab": "b3" } });
+  const e = term({ address: "t5", labels: { "herdr.space": "s2", "herdr.tab": "b3" } });
+  const terms = [a, b, c, d, e];
+  let m = {};
+  for (const x of terms) m = { ...m, [x.address]: track(m[x.address], x, t0) };
+  m = { ...m, t5: track(track(undefined, busy({ address: "t5", labels: e.labels }), t0), e, t0 + MIN_RUN_MS) };
+  const rows = allRows(m, terms, { currentSpace: "s2", spaceOrder: ["s1", "s2"], tabOrder: ["b3", "b2", "b1"], spaceNames: { s1: "one", s2: "two" }, tabNames: { b1: "main", b2: "build" }, now: t0 + MIN_RUN_MS });
+  assert.deepEqual(rows.map((r) => [r.address, r.spaceName, r.kind]), [["t4", "two", "exited"], ["t5", "two", "finished"], ["t2", "two", null], ["t1", "one", null]]);
+  assert.deepEqual([rows[3].program, rows[3].cwd, rows[3].tabName, rows[2].program, rows[2].tabName], ["zsh", "app", "main", "make", "build"]);
+  assert.equal(count(waitingList(m, terms, { now: t0 + MIN_RUN_MS })), 2);
+});
+
+test("allRows: an exited terminal is listed while it holds its mark; rows hold no ages", () => {
+  const x = term({ address: "t9", state: "finished", finished_ms: t0 - 5, exit_code: 1 });
+  const m = mem(track(undefined, x, t0), "t9");
+  const [r] = allRows(m, [x], { now: t0 });
+  assert.equal(r.kind, "exited");
+  assert.deepEqual(allRows(m, [x], { now: t0 + 99 * S }), [r]);
+  assert.deepEqual(allRows({}, [x], {}), []);
 });

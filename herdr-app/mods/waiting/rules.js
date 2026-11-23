@@ -140,14 +140,48 @@ export const waitingList = (memory, terms, opts = {}) => {
       out.push({ address: term.address, space, tab, spaceName: spaceNames[space] ?? space, tabName: tabNames[tab] ?? tab, title: term.title ?? "", ...e });
     }
   }
-  const rank = (s) => {
-    if (s === currentSpace) return -1;
-    const i = spaceOrder.indexOf(s);
-    return i < 0 ? spaceOrder.length : i;
-  };
+  const rank = spaceRank(currentSpace, spaceOrder);
   return out.sort((a, b) =>
     rank(a.space) - rank(b.space) || (a.space < b.space ? -1 : a.space > b.space ? 1 : 0) ||
     (a.kind === "quiet") - (b.kind === "quiet") || a.since - b.since || (a.address < b.address ? -1 : 1));
+};
+
+// The current space first, then spaces() order, unknown spaces last.
+const spaceRank = (currentSpace, spaceOrder) => (s) => {
+  if (s === currentSpace) return -1;
+  const i = spaceOrder.indexOf(s);
+  return i < 0 ? spaceOrder.length : i;
+};
+
+const tail = (p) => {
+  const parts = String(p ?? "").split("/").filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : p ? "/" : "";
+};
+
+// Every live plain terminal for the sidebar list: the waiting entries' kinds merged onto all of them.
+// opts: as waitingList plus tabOrder (tab ids). No focused/now-dependent exclusion: the focused terminal's marks are already
+// cleared by markSeen, and the view marks it from the live focus. Rows hold no ages, so the published list changes only
+// when something about a terminal changes. Rows: { address, space, tab, spaceName, tabName, program, cwd, kind|null, since }.
+export const allRows = (memory, terms, opts = {}) => {
+  const { currentSpace = null, spaceOrder = [], tabOrder = [], spaceNames = {}, tabNames = {}, now = null } = opts;
+  const out = [];
+  for (const term of terms ?? []) {
+    if (!isPlain(term)) continue;
+    const m = memory?.[term.address];
+    const e = m && !m.ignored ? entryOf(term, m, now) : null;
+    if (term.state === "finished" && !e) continue; // an exited terminal is listed only while it holds its mark
+    const space = spaceOf(term), tab = tabOf(term);
+    const name = String(term.foreground?.name ?? "").replace(/^-/, "");
+    out.push({
+      address: term.address, space, tab, spaceName: spaceNames[space] ?? space, tabName: tabNames[tab] ?? "",
+      program: name || term.title || "", cwd: tail(term.foreground?.cwd ?? term.cwd), kind: e?.kind ?? null, since: e?.since ?? null,
+    });
+  }
+  const rank = spaceRank(currentSpace, spaceOrder);
+  const tabRank = (t) => { const i = tabOrder.indexOf(t); return i < 0 ? tabOrder.length : i; };
+  return out.sort((a, b) =>
+    rank(a.space) - rank(b.space) || (a.space < b.space ? -1 : a.space > b.space ? 1 : 0) ||
+    tabRank(a.tab) - tabRank(b.tab) || (a.address < b.address ? -1 : 1));
 };
 
 export const count = (list) => list.filter((e) => e.kind !== "quiet").length;

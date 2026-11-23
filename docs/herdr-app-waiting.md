@@ -1,6 +1,6 @@
 # Waiting: jump to the plain terminals that wait on you
 
-Waiting is a Herdr app mod. It lists every plain terminal (not an agent, not a hidden worker) that waits on you, across spaces, and jumps to one fast. Herdr's own Agents list covers agents.
+Waiting is a Herdr app mod. It lists every plain terminal (not an agent, not a hidden worker) in a sidebar block above Spaces, marks the ones that wait on you, across spaces, and jumps to one fast. Herdr's own Agents list covers agents.
 
 ## What counts as waiting
 
@@ -20,27 +20,31 @@ Waiting is a Herdr app mod. It lists every plain terminal (not an agent, not a h
 
 If a key is taken, install prints the line to add.
 
-## Badge
+## Terminals list
 
-A one-row block `Waiting · n` sits under Herdr's Spaces list in `harbormaster-main`. `n` counts finished, exited and needs-input terminals, not Quiet. Click it to open the picker. It is `{ "mod": "waiting", "props": { "role": "badge" } }`, 28 px high; to use it in a layout of your own, add such a block.
+A block above Herdr's Spaces list in `harbormaster-main`. Its header reads `Terminals · n waiting` (dim at 0; `n` counts finished, exited and needs-input terminals, not Quiet) and a click on it opens the picker. Below it is every live plain terminal, grouped by space (the current space first, then the order of the Spaces list; scrolls). A row shows a mark, the foreground program (or shell), the tab name and the last folder of its working directory:
+- `!` (red) needs input, `✓` finished, `✕` exited, a dim `·` quiet; no mark for a running or idle terminal.
+- The terminal you are in is highlighted. A click on a row focuses it, which clears its mark.
+
+It is `{ "mod": "waiting", "props": { "role": "list" } }` with weight 0.5; to use it in a layout of your own, add such a block. The older one-row badge (`"role": "badge"`, `Waiting · n`, 28 px) still works in a layout that has it.
 
 ## Install
 
 `herdr-app/install.sh` (see [docs/herdr-app-harbormaster.md](herdr-app-harbormaster.md#install)) also:
 - copies `herdr-app/mods/waiting` into the app's home. It refuses to replace a `mods/waiting` whose `mod.json` title is not `Waiting`.
-- adds the badge block to the column of `harbormaster-main` that holds the Crew block, only on the run that first installs `mods/waiting`. Re-running install does not bring back a badge you removed. A layout that already has a Waiting block is left alone.
+- adds the list block just above Spaces, in the column of `harbormaster-main` that holds the Crew block, only on the run that first installs `mods/waiting`. Re-running install does not bring back a block you removed. A layout that already has a Waiting block is left alone, except that a badge block of an earlier install becomes the list block and moves above Spaces (on any run).
 - adds the two keys as above.
 
 ## Known limits
 
-- `waiting.next` and the counting need the badge shown: the badge copy is what polls and what receives `cmd-j`. With a collapsed sidebar, or a layout without the badge block, `cmd-j` does nothing. `cmd-shift-j` still works: the picker copy polls too (the shared lock lets one copy poll at a time), so its list is current without the badge.
+- `waiting.next` and the counting need the list (or badge) block shown: that copy is what polls and what receives `cmd-j`. With a collapsed sidebar, or a layout without the block, `cmd-j` does nothing. `cmd-shift-j` still works: the picker copy polls too (the shared lock lets one copy poll at a time), so its list is current without the block.
 - Cost: one `ps` per machine per poll (2 s) for the foreground pids of non-shell terminals. A terminal's screen is read (`hc read`) only while its CPU is under 1 %; once its screen has been unchanged for 5 s and classified, it is read every 10 s instead of every 2 s.
 - Needs input is a guess from the screen, the CPU and the last line. Remote terminals are read through the terminal's own machine (its CPU, via `hc`), so they follow what that machine answers.
 - Marks live in the mod's memory. Reloading the mod resets them.
 
 ## Files
 
-`herdr-app/mods/waiting/`: `rules.js` (pure rules, no Herdr imports), `view.js` (pure view helpers), `main.js` (badge, picker, polling, focus), `mod.json`. Tests: `tests/herdr-app-waiting/`.
+`herdr-app/mods/waiting/`: `rules.js` (pure rules, no Herdr imports), `view.js` (pure view helpers), `main.js` (list, badge, picker, polling, focus), `mod.json`. Tests: `tests/herdr-app-waiting/`.
 
 ## Remove
 
