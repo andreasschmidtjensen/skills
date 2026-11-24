@@ -11,7 +11,7 @@ import { repoRoot, openFolders, runFolders, scanFolders, isFolder } from "./repo
 import { recentFolders, listFolders, matchFolders, literalFolder, tilde, base, newSpaceId, spaceAt, ownId, machineLabel } from "./folders.js";
 import {
   KINDS, DRAFTS, profileText, parseProfile, profileFor, buildPrompt, inputProblem, runAgentName, startArgs,
-  startOutcome, parsePrefs, AGENTS, agentFor, agentLabel, lastProfile, prefillProfile, roleValue, modelProblems, setRole, parsePiModels, parseOpencodeModels, CAPTAIN_PROMPT, captainProblem, captainName, captainArgs, draftsFor, remember, markReviewStarted, clearReviewStarted, reviewStarting,
+  startOutcome, parsePrefs, AGENTS, agentFor, agentLabel, lastProfile, prefillProfile, roleValue, modelProblems, setRole, parsePiModels, parseOpencodeModels, WHERES, whereFor, CAPTAIN_PROMPT, captainProblem, captainName, captainArgs, draftsFor, remember, markReviewStarted, clearReviewStarted, reviewStarting,
 } from "./startrun.js";
 export { reviewStarting } from "./startrun.js";
 
@@ -83,16 +83,16 @@ export async function launch(args) {
   catch (e) { return { ok: false, error: `Could not start it: ${String(e?.message ?? e).split("\n")[0].slice(0, 160)}` }; }
 }
 
-async function launchRun({ repo, kind, input, profile, drafts, agent = "claude" }) {
+async function launchRun({ repo, kind, input, profile, drafts, agent = "claude", where = "checkout" }) {
   const problem = inputProblem(kind, input);
   if (problem) return { ok: false, error: problem };
   if (!repo) return { ok: false, error: "Pick a folder first" };
   const name = runAgentName(repo.name, kind, input);
   return startAgent({
     // The orchestrator's own model, when the line gives one; else the agent's default.
-    repo, name, prompt: buildPrompt({ kind, input, profile, drafts, agent }), args: (a) => startArgs({ ...a, kind: agent, model: roleValue(profile.orchestrator, agent).model }),
+    repo, name, prompt: buildPrompt({ kind, input, profile, drafts, agent, where }), args: (a) => startArgs({ ...a, kind: agent, model: roleValue(profile.orchestrator, agent).model }),
     // Remembered once it started, so a typo'd start leaves the last good profile alone.
-    remembered: async () => ({ kind, profile, repo: draftsKey(await repoRoot(repo.root, repo.machine ?? null), repo.machine), recent: !repo.machine, drafts, agent }),
+    remembered: async () => ({ kind, profile, repo: draftsKey(await repoRoot(repo.root, repo.machine ?? null), repo.machine), recent: !repo.machine, drafts, agent, where }),
   });
 }
 
@@ -198,7 +198,7 @@ export function initNewRun(view, cx) {
   const p = props() ?? {};
   const kind = p.kind === "captain" || KINDS.some((k) => k.id === p.kind) ? p.kind : "issue";
   const nr = view.nr = { kind, entries: [], found: [], typedDir: null, folder: null, open: false, sel: 0, query: "", shown: "",
-    home: home(), top: 0, memo: null, drafts: "herdr", prefs: null, error: null, busy: false, prefill: "", agent: "claude", agents: [], models: {}, modelsReady: false };
+    home: home(), top: 0, memo: null, drafts: "herdr", at: "checkout", prefs: null, error: null, busy: false, prefill: "", agent: "claude", agents: [], models: {}, modelsReady: false };
   // The work can run to a few lines: a textarea that grows with it (Enter is a new line).
   nr.text = TextareaState.new({ placeholder: "" });
   nr.text.set_auto_grow(3, 8);
@@ -228,6 +228,7 @@ export function initNewRun(view, cx) {
     nr.agentsOn = on;
     nr.agentsPending = true;
     nr.drafts = draftsFor(prefs, draftKey(nr));
+    nr.at = whereFor(prefs);
     // The folders typed text may find: scanned once the lists are known, cheap and cached; with the agents, in parallel.
     const scan = scanFolders(nr.entries, nr.home).catch(() => []).then((found) => { nr.found = found; cx.notify(); });
     const agents = await installedAgents(on).catch(() => []);
@@ -384,12 +385,12 @@ function start(view, cx, fromList = false) {
     : lineProblem(nr, profile) || inputProblem(nr.kind, nr.text.value());
   if (problem) { nr.error = problem; nr.hint = true; nr.open = false; cx.notify(); return; }
   nr.busy = true; nr.error = null; nr.hint = false; nr.open = false;
-  const ask = { pick, profile, kind: nr.kind, input: nr.text.value(), drafts: nr.drafts, agent: nr.agent, overlay: props()?.overlay, url: sameAsOpened(nr) ? props()?.url : null };
+  const ask = { pick, profile, kind: nr.kind, input: nr.text.value(), drafts: nr.drafts, where: nr.at, agent: nr.agent, overlay: props()?.overlay, url: sameAsOpened(nr) ? props()?.url : null };
   cx.notify();
   cx.spawn((cx) => startNow(view, cx, ask));
 }
 
-async function startNow(view, cx, { pick, profile, kind, input, drafts, agent, overlay, url }) {
+async function startNow(view, cx, { pick, profile, kind, input, drafts, where, agent, overlay, url }) {
   const nr = view.nr;
   let out;
   try {
@@ -399,7 +400,7 @@ async function startNow(view, cx, { pick, profile, kind, input, drafts, agent, o
     // A space whose folder is stale still has the folder's terminal: that is the space the tab goes in.
     const space = pick.space || spaceAt(pick.folder, open, panes(), on);
     const repo = { space, name: base(pick.folder), root: pick.folder, machine: on, spaceId: space ? null : newSpaceId(pick.folder, open, on) };
-    const go = () => launch({ repo, kind, input, profile, drafts, agent });
+    const go = () => launch({ repo, kind, input, profile, drafts, agent, where });
     out = kind === "captain" ? await launchCaptain({ repo })
       : kind === "review" && url ? await guardReview({ id: url, url, run: go }) : await go();
   } catch (e) { out = { ok: false, error: `Could not start it: ${String(e?.message ?? e).split("\n")[0].slice(0, 160)}` }; }
@@ -468,6 +469,8 @@ export function newRunView(view, t) {
   const drafts = nr.kind === "review" && field(t, "Review comments",
     h_flex().gap(6).children(DRAFTS.map((d) => pill(t, `nr-d-${d.id}`, d.label, nr.drafts === d.id, (cx) => set({ drafts: d.id }, cx), d.tip))),
     nr.drafts === "direct" && div().text_size(11).text_color(t.dim).child("Posted in your name at once. Not remembered as this folder's default."));
+  const whereRow = nr.kind === "oneoff" && field(t, "Where",
+    h_flex().gap(6).children(WHERES.map((w) => pill(t, `nr-w-${w.id}`, w.label, nr.at === w.id, (cx) => set({ at: w.id }, cx), w.tip))));
   // Only a choice when more than one is installed; with one (or none found) it is that, unsaid.
   const agentRow = nr.agents.length > 1 && field(t, "Agent", h_flex().gap(6).flex_wrap().children(AGENTS.filter((a) => nr.agents.includes(a.id))
     .map((a) => pill(t, `nr-a-${a.id}`, a.label, nr.agent === a.id, (cx) => { nr.agent = a.id; setProfile(nr); set({}, cx); }, a.tip))));
@@ -493,7 +496,7 @@ export function newRunView(view, t) {
     .children(captain ? [] : [agentRow, field(t, "What", h_flex().gap(6).children(KINDS.map((k) => pill(t, `nr-k-${k.id}`, k.label, nr.kind === k.id,
       (cx) => { nr.kind = k.id; setProfile(nr); nr.drafts = draftsFor(nr.prefs, draftKey(nr)); set({}, cx); })))),
       field(t, kind.hint, framedArea(t, nr.text), div().text_size(11).text_color(t.dim).child(kind.example)),
-      field(t, "Profile", framed(t, nr.profile), profileNote), drafts].filter(Boolean))
+      field(t, "Profile", framed(t, nr.profile), profileNote), drafts, whereRow].filter(Boolean))
     .child(div().flex_1())
     .children([nr.error && div().text_size(12).text_color(nr.done || nr.hint ? t.muted : t.blocked).child(nr.error)].filter(Boolean))
     .child(h_flex().gap(8).justify_end()

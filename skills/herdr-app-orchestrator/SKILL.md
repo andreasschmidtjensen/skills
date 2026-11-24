@@ -2,7 +2,7 @@
 name: herdr-app-orchestrator
 description: "Manually orchestrate a larger implementation with hidden hc agents in git worktrees, role-specific agent kinds and models, independent reviews per task or of the whole branch, and an integration branch per repository that is the only PR branch, across one repository or several, such as a frontend and a backend. For the Herdr app (herdr-core, `hc`), not the older Herdr TUI. The work comes from the current session, a description, a plan file, or one or more GitHub issues (and chosen sub-issues)."
 disable-model-invocation: true
-argument-hint: "[what to build, a path to a plan/spec, or issues like #185 #190; defaults to this session's discussion] [start with #dependency] [sub-issues=ask|all|none] [agent=<kind>] [model=<model>] [implementer/reviewer/specialist overrides] [merge=squash|merge] [push-task-branches=yes|no] [draft-pr=ask|yes|no] [task-review=yes|no] [final-review=ask|yes|no] [review-rounds=<n>] [close-issues=sub|all|none] [grunt=<kind>] [grunt-model=<model>] [type=feat|fix|rev|expl] [branch=<name>]"
+argument-hint: "[what to build, a path to a plan/spec, or issues like #185 #190; defaults to this session's discussion] [start with #dependency] [sub-issues=ask|all|none] [agent=<kind>] [model=<model>] [implementer/reviewer/specialist overrides] [merge=squash|merge] [push-task-branches=yes|no] [draft-pr=ask|yes|no] [task-review=yes|no] [final-review=ask|yes|no] [review-rounds=<n>] [close-issues=sub|all|none] [grunt=<kind>] [grunt-model=<model>] [type=feat|fix|rev|expl] [branch=<name>] | oneoff [where=checkout|worktree] [pr=no] <description>"
 compatibility: Requires git, jq, the Herdr app, and herdr-core (`hc`). Issues and PRs require the GitHub CLI.
 metadata:
   required-skills: "herdr-core"
@@ -16,7 +16,7 @@ Act as the sole coordinator for a larger piece of work. The user talks only to y
 - Use `hc` for agents and programs. Use `herdr-app` only for your own tab's name, the integration worktree's space (through `integration-worktree.sh`), and, when the run is closed, to close that space and your tab (section 9). Agents and task worktrees stay hidden, as sub-agents under you in Herdr's Agents list: never give them tabs, panes, or spaces unless the user asks.
 - Delegate only through `hc`, never with your own harness's sub-agent tool, which `herdr-app-captain` cannot see and which dies with your turn. Run anything that outlives a command, such as builds, CI watches, and dev servers, with `hc run --bg`, never with shell `&`, `nohup`, `tmux`, or your harness's background shell.
 - Make every code or documentation change in a git worktree under `~/.herdr/worktrees/<repo>/<branch>`, where the Herdr app's own worktrees go, so the user can open any of them from its Open worktree menu. Create worktrees only with `git worktree add` there, never with your harness's own worktree tool (such as Claude Code's `EnterWorktree`) or in a scratch directory. Give each its own installed dependencies (`composer install`, `npm ci`, and the like), not symlinks to the checkout's: a symlinked `vendor` or `node_modules` can load the checkout's code, so tests would not cover the worktree's.
-- You start in the repository's own checkout, usually on its default branch, in the space the user opened for it. Stay there. The checkout belongs to the user: never check out, commit, merge, pull, reset, or stash in it, and never run tests or builds against it.
+- You start in the repository's own checkout, usually on its default branch, in the space the user opened for it. Stay there. The checkout belongs to the user: never check out, commit, merge, pull, reset, or stash in it, and never run tests or builds against it. The one exception is a one-off run with `where=checkout` ([references/oneoff.md](references/oneoff.md)), which works on its own branch there and switches back when done.
 - Each repository the work touches gets one integration branch from its default branch, all with the same name; every completed task branch merges into its repository's. Only integration branches become PRs, one per repository, each linking the others; never a task branch. The user reviews the final integration branch, never task branches.
 - Never commit bulky generated output (evaluation runs, recordings, reports, screenshots). Store it outside the repository and commit only a summary.
 - Agents never see your conversation. Everything they need is in the spec and briefs.
@@ -40,6 +40,8 @@ This section produces the run directory with `spec.md`, `decisions.md`, and `pla
 7. Record the run prefix in `plan.md`, below the Status line. Every name in sections 3, 4, and 8 starts with it.
 
 A review run (`review <PR>`) skips steps 5 and 6 (no integration branch, worktree, space or push): record the prefix as in step 7, then follow [references/review.md](references/review.md) instead of the planning and merging sections.
+
+A one-off run (`oneoff <description>`) is a simple task tracked in Harbormaster but not orchestrated: it skips steps 5 and 6 too, makes the change itself, and follows [references/oneoff.md](references/oneoff.md) instead of the planning and merging sections.
 
 Addresses such as `t7` come from `hc`; never predict them. Refer to your agents by name.
 

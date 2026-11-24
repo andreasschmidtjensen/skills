@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_PROFILE, AGENTS, agentFor, lastProfile, skillPrompt, roleValue, matchModels, modelProblems, setRole, parsePiModels, parseOpencodeModels, profileText, parseProfile, profileFor, buildPrompt, inputProblem, prRef, runAgentName, startArgs,
-  startOutcome, parsePrefs, draftsFor, remember, prefillProfile, lastReviewProfile,
+  startOutcome, parsePrefs, draftsFor, remember, prefillProfile, lastReviewProfile, KINDS, whereFor,
 } from "../../herdr-app/mods/harbormaster/startrun.js";
 import { newRunArgs } from "../../herdr-app/mods/harbormaster/commands.js";
 import { parseReviewRequests, runReviewing, withContext } from "../../herdr-app/mods/harbormaster/reviews.js";
@@ -65,7 +65,7 @@ test("start-agent.sh's outcomes read calmly", () => {
 
 test("the last profile and each repository's drafts mode are remembered; direct never is", () => {
   let p = parsePrefs("not json");
-  assert.deepEqual(p, { profile: null, profiles: {}, reviewProfiles: {}, agent: null, drafts: {}, folders: [] });
+  assert.deepEqual(p, { profile: null, profiles: {}, reviewProfiles: {}, oneoffProfiles: {}, agent: null, drafts: {}, folders: [], where: null });
   p = remember(p, { kind: "issue", profile: { ...DEFAULT_PROFILE, implementer: "opus" }, repo: "/r" });
   assert.equal(p.profile.implementer, "opus");
   p = remember(p, { kind: "review", profile: { ...DEFAULT_PROFILE, reviewer: "sonnet", autonomy: "L2" }, repo: "/r", drafts: "pending" });
@@ -245,4 +245,33 @@ test("the last review's reviewer is remembered per agent and prefills the next r
   assert.deepEqual(prefillProfile(p, "review", "opencode"), { reviewer: "", autonomy: "L1" });
   assert.equal(prefillProfile(p, "issue", "claude").implementer, "opus", "a feature run still uses its own profile");
   assert.deepEqual(parsePrefs(JSON.stringify(p)), p);
+});
+
+test("a one-off's prompt is oneoff, where and the options, with no implementer, reviewer or specialist", () => {
+  const profile = profileFor("oneoff", DEFAULT_PROFILE);
+  assert.deepEqual(profile, { autonomy: "L1" });
+  assert.equal(buildPrompt({ kind: "oneoff", input: " fix the  typo\nin README ", profile, where: "worktree" }),
+    "/herdr-app-orchestrator oneoff where=worktree autonomy=L1 fix the typo in README");
+  assert.equal(buildPrompt({ kind: "oneoff", input: "x", profile }), "/herdr-app-orchestrator oneoff where=checkout autonomy=L1 x", "checkout is the default");
+  assert.equal(buildPrompt({ kind: "oneoff", input: "x where=worktree autonomy=L3", profile, where: "checkout" }),
+    "/herdr-app-orchestrator oneoff where=checkout autonomy=L1 x", "words in the text cannot override where or autonomy");
+  assert.equal(buildPrompt({ kind: "oneoff", input: "x", profile: { orchestrator: "opus", autonomy: "L2" }, agent: "pi", where: "worktree" }),
+    "/skill:herdr-app-orchestrator oneoff where=worktree agent=pi autonomy=L2 x");
+  assert.equal(buildPrompt({ kind: "oneoff", input: "x", profile: { implementer: "haiku", reviewer: "opus", specialist: "opus", autonomy: "L1" }, where: "checkout" }),
+    "/herdr-app-orchestrator oneoff where=checkout autonomy=L1 x", "roles in the profile are not passed to a one-off");
+  assert.equal(inputProblem("oneoff", " "), "What should it do?");
+  assert.equal(inputProblem("oneoff", "fix it"), null);
+});
+
+test("the where choice and a one-off's own profile are remembered; no other kind's are touched", () => {
+  assert.equal(whereFor(null), "checkout");
+  assert.equal(whereFor({ where: "bogus" }), "checkout");
+  const a = remember(null, { kind: "oneoff", profile: { orchestrator: "opus", autonomy: "L2", implementer: "haiku" }, repo: "/p/x", where: "worktree" });
+  assert.equal(whereFor(a), "worktree");
+  assert.deepEqual(prefillProfile(a, "oneoff", "claude"), { autonomy: "L2", orchestrator: "opus" });
+  assert.equal(a.profile, null, "the feature profile is left alone");
+  assert.equal(whereFor(remember(a, { kind: "issue", profile: DEFAULT_PROFILE, repo: "/p/x" })), "worktree", "another kind keeps it");
+  assert.equal(whereFor(parsePrefs(JSON.stringify(a))), "worktree");
+  assert.deepEqual(parsePrefs("garbage").oneoffProfiles, {});
+  assert.ok(KINDS.some((k) => k.id === "oneoff" && k.label === "One-off"));
 });

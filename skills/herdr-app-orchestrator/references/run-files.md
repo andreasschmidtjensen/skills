@@ -13,7 +13,7 @@ and it keeps nothing the files do not.
 | `orchestrator.json` | `init-run.sh` | captain, Harbormaster | `{terminal, tab_id, folder, branch, kind, started}`: how to find and resume the run. |
 | `spec.md` | orchestrator | orchestrator, agents | The goal, scope and acceptance criteria. |
 | `plan.md` | orchestrator | everyone | First line `Status: <one line>` (`running`, `waiting for user: <summary>`, `blocked: <reason>`, `finished`), then `Prefix:` and the tasks with their states. |
-| `status.json` | `set-status.sh`, `tokens.sh` | captain, Harbormaster | `{branch, folder, status, state, type, topic, progress, tasks: {merged, planned}, autonomy, issues, prs, related, waiting, updated, tokens, budget, budget_asked, budget_answered}`. Outlives the orchestrator. `set-status.sh` keeps fields other scripts write. |
+| `status.json` | `set-status.sh`, `tokens.sh` | captain, Harbormaster | `{branch, folder, status, state, type, topic, progress, tasks: {merged, planned}, autonomy, issues, prs, related, waiting, updated, tokens, budget, budget_asked, budget_answered, oneoff (`checkout` or `worktree`, one-offs only), pushed (the branch a one-off pushed with no PR)}`. Outlives the orchestrator. `set-status.sh` keeps fields other scripts write. |
 | `sessions` | `tokens.sh` | `tokens.sh` | Every session the orchestrator's terminal has had, one `<kind> <session id or file>` a line (below). |
 | `.tokens/` | `tokens.sh` | `tokens.sh` | Its cache: each session file's parsed usage and how far it was read (below). |
 | `.resources.json` | Harbormaster | Harbormaster, run history | CPU and memory per agent and program, added to on each 5 s poll while the run is open (below). |

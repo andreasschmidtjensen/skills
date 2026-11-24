@@ -56,6 +56,10 @@ export function runName(branch, topic) {
 export const typeTag = (t, type, id = null, size = 10) => (id ? div().id(id).tooltip(typeTip(type)) : div()).flex_none().text_size(size).font_semibold().px(5).rounded(4)
   .bg(t.raised).text_color(t.muted).child(String(type));
 
+// A one-off's "1×" tag, beside its type tag in the same style: it was done in one go, with no tasks.
+export const oneoffTag = (t, mode, id = null, size = 10) => (id ? div().id(id).tooltip(`One-off: a single task the orchestrator did itself, ${mode === "worktree" ? "in a worktree" : "in your checkout"}`) : div())
+  .flex_none().text_size(size).font_semibold().px(5).rounded(4).bg(t.raised).text_color(t.muted).child("1×");
+
 // Puts a runName() on an element: the title as its text, the tip, if any, as its tooltip.
 export const withTip = (el, { title, tip }, prefix = "") => el.child(`${prefix}${title}`).when(Boolean(tip), (e) => e.tooltip(tip));
 

@@ -5,7 +5,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { PR_TONE, markOpened } from "./data.js";
 import { focusAgent } from "./live.js";
 import { TYPE } from "./ui.js";
-import { prStateText } from "./prfacts.js";
+import { prStateText, noPrText } from "./prfacts.js";
 import { showsFlow } from "./needaction.js";
 import { drawnInPane, linkChip, taskStrip, actionRow } from "./cardparts.js";
 import { needItemsOf } from "./needitems.js";
@@ -47,9 +47,9 @@ function drawCard(view, t, r, ctx, compact) {
     .when(Boolean(proof), (el) => el.child(h_flex().id(`proof-${r.key}`).flex_wrap().items_center().gap(6).px(2).text_size(TYPE.meta).when(Boolean(proof.tip), (e) => e.tooltip(proof.tip))
       .child(div().flex_none().text_size(TYPE.meta).font_semibold().text_color(t.dim).child("Claims"))
       .child(h_flex().flex_wrap().items_center().children(joined(t, proof.parts)))))
-    .when(!compact && counts.planned > 0, (el) => el.child(taskStrip(t, r, counts, f.stages)))
+    .when(!compact && !r.oneoff && counts.planned > 0, (el) => el.child(taskStrip(t, r, counts, f.stages)))
     .when(links.length > 0, (el) => el.child(h_flex().flex_wrap().gap(6).children(links)))
     .when(prs.length > 0 && !r.away && !(need && showsFlow(needItemsOf(r, ctx, f.att))), (el) => el.child(flowToggle(t, r, `card-${r.key}`)))
-    .when(prs.length === 0 && related.length === 0 && r.phase !== "finished" && !compact, (el) => el.child(div().text_size(TYPE.meta).text_color(t.dim).child("No pull request yet")))
+    .when(prs.length === 0 && related.length === 0 && !compact && Boolean(noPrText(r, { card: true })), (el) => el.child(div().text_size(TYPE.meta).text_color(t.dim).child(noPrText(r, { card: true }))))
     .child(actionRow(view, t, r, orch, closed, counts));
 }

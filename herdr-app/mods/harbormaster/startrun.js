@@ -9,7 +9,15 @@ export const KINDS = [
   { id: "issue", label: "Issue(s)", hint: "Issue numbers or URLs", example: "12 14 or a GitHub issue URL" },
   { id: "review", label: "Review PR", hint: "Pull request number or URL", example: "123 or a GitHub PR URL" },
   { id: "describe", label: "Describe", hint: "What should it do?", example: "Say it in your own words" },
+  { id: "oneoff", label: "One-off", hint: "What should it do?", example: "A small task the orchestrator does itself" },
 ];
+
+// Where a one-off works: the user's own checkout (a new branch there) or a hidden worktree.
+export const WHERES = [
+  { id: "checkout", label: "In my checkout", tip: "A new branch in this folder; it asks first when the checkout has changes" },
+  { id: "worktree", label: "In a worktree", tip: "A hidden worktree under ~/.herdr/worktrees, kept until you close the run" },
+];
+export const whereFor = (prefs) => (WHERES.some((w) => w.id === prefs?.where) ? prefs.where : "checkout");
 
 export const DRAFTS = [
   { id: "herdr", label: "Show drafts in Herdr", tip: "Findings become draft comments in the run's tab and the Needs-you box; nothing reaches GitHub until you post it" },
@@ -37,6 +45,8 @@ export function agentFor(prefs, installed) {
 // Model names are Claude's: another agent's models are provider/id, so its roles start empty (its own default).
 export const DEFAULT_PROFILE = { implementer: "sonnet", reviewer: "opus", specialist: "opus", autonomy: "L1" };
 export const REVIEW_PROFILE = { reviewer: "opus", autonomy: "L1" };
+// A one-off implements itself: no implementer, reviewer or specialist, only autonomy (and the orchestrator).
+export const ONEOFF_PROFILE = { autonomy: "L1" };
 const OTHER_PROFILE = { implementer: "", reviewer: "", specialist: "", autonomy: "L1" };
 
 const ROLES = ["implementer", "reviewer", "specialist"];
@@ -137,15 +147,20 @@ export function parseProfile(text, base = DEFAULT_PROFILE) {
 // profile holds only what it uses (reviewer, autonomy; the orchestrator if a line gives one): the agent's
 // remembered review profile (`lastReview`), else the preset. `last` is that agent's (prefs.profiles[agent]);
 // the Opus preset is Claude's only.
-export const profileFor = (kind, last, agent = "claude", lastReview = null) => kind === "review"
+export const profileFor = (kind, last, agent = "claude", lastReview = null, lastOneoff = null) => kind === "oneoff"
+  ? { ...ONEOFF_PROFILE, ...oneoffPart(lastOneoff) }
+  : kind === "review"
   ? { ...(agent === "claude" ? REVIEW_PROFILE : { reviewer: "", autonomy: "L1" }), ...reviewPart(lastReview) }
   : agent === "claude" ? { ...DEFAULT_PROFILE, ...(last ?? {}) } : { ...OTHER_PROFILE, ...(last ?? {}) };
 
 // The review's own roles of a profile: reviewer, autonomy and the orchestrator, when set.
 const reviewPart = (p) => Object.fromEntries(["orchestrator", "reviewer", "autonomy"].filter((k) => p?.[k] != null && (p[k] || k === "reviewer")).map((k) => [k, p[k]]));
 
+// The one-off's own roles of a profile: the orchestrator and autonomy, when set.
+const oneoffPart = (p) => Object.fromEntries(["orchestrator", "autonomy"].filter((k) => p?.[k]).map((k) => [k, p[k]]));
+
 // The profile the dialog prefills for a kind and agent, from the remembered prefs.
-export const prefillProfile = (prefs, kind, agent) => profileFor(kind, lastProfile(prefs, agent), agent, lastReviewProfile(prefs, agent));
+export const prefillProfile = (prefs, kind, agent) => profileFor(kind, lastProfile(prefs, agent), agent, lastReviewProfile(prefs, agent), lastOneoffProfile(prefs, agent));
 
 // How each agent runs a skill: Claude Code by its slash command, pi by /skill:, the others asked in words.
 export function skillPrompt(agent, skill, args) {
@@ -159,7 +174,8 @@ const oneLine = (s) => String(s).replace(/\s+/g, " ").trim();
 // The orchestrator's first prompt: `/herdr-app-orchestrator <work> <options>`; a review is
 // `review <pr> review-drafts=<mode>` (herdr-app-orchestrator's review preset).
 // Another agent than Claude Code also gets agent=<it>, so the run's own agents are that kind too.
-export function buildPrompt({ kind, input, profile, drafts = "herdr", agent = "claude" }) {
+// A one-off is `oneoff where=<where> <options> <text>`.
+export function buildPrompt({ kind, input, profile, drafts = "herdr", agent = "claude", where = "checkout" }) {
   // Words the profile, drafts or agent own would override them: the text keeps only its own.
   const work = oneLine(input).split(" ").filter((w) => !/^(?:type|review-drafts|autonomy|agent|(?:implementer|reviewer|specialist)(?:-model)?)=/i.test(w)).join(" ");
   // A role on another agent says so (implementer=opencode), then its model: the skill's own form.
@@ -167,7 +183,10 @@ export function buildPrompt({ kind, input, profile, drafts = "herdr", agent = "c
     const { kind, model } = roleValue(profile[r], agent);
     return [...(kind !== agent ? [`${r}=${kind}`] : []), ...(model ? [`${r}-model=${model}`] : [])];
   });
-  const opts = [...(agent === "claude" ? [] : [`agent=${agent}`]), ...roles, `autonomy=${profile.autonomy}`].join(" ");
+  const agentOpt = agent === "claude" ? [] : [`agent=${agent}`];
+  const opts = [...agentOpt, ...roles, `autonomy=${profile.autonomy}`].join(" ");
+  // A one-off has no sub-agents: no implementer, reviewer or specialist.
+  if (kind === "oneoff") return skillPrompt(agent, "herdr-app-orchestrator", `oneoff where=${where} ${[...agentOpt, `autonomy=${profile.autonomy}`].join(" ")} ${work.split(" ").filter((w) => !/^where=/i.test(w)).join(" ")}`);
   return skillPrompt(agent, "herdr-app-orchestrator", kind === "review" ? `review ${work} type=rev review-drafts=${drafts} ${opts}` : `${work} ${opts}`);
 }
 
@@ -248,8 +267,10 @@ export function parsePrefs(text) {
     const folders = Array.isArray(j?.folders) ? j.folders.filter((f) => typeof f === "string" && f) : [];
     // Each agent's last review profile ({reviewer, autonomy, orchestrator?}); old files have none.
     const reviewProfiles = j?.reviewProfiles && typeof j.reviewProfiles === "object" && !Array.isArray(j.reviewProfiles) ? j.reviewProfiles : {};
-    return { profile, profiles, reviewProfiles, agent, drafts, folders };
-  } catch { return { profile: null, profiles: {}, reviewProfiles: {}, agent: null, drafts: {}, folders: [] }; }
+    const oneoffProfiles = j?.oneoffProfiles && typeof j.oneoffProfiles === "object" && !Array.isArray(j.oneoffProfiles) ? j.oneoffProfiles : {};
+    const where = typeof j?.where === "string" ? j.where : null;
+    return { profile, profiles, reviewProfiles, oneoffProfiles, agent, drafts, folders, where };
+  } catch { return { profile: null, profiles: {}, reviewProfiles: {}, oneoffProfiles: {}, agent: null, drafts: {}, folders: [], where: null }; }
 }
 
 // The review-drafts mode a repository starts with: its remembered one, never "direct".
@@ -261,14 +282,18 @@ export const draftsFor = (prefs, repo) => (["herdr", "pending"].includes(prefs?.
 // The agent is remembered from any run's start; the profile under that agent.
 // `recent` false (a folder on another machine, `repo` being "<machine>:<folder>"): the recents,
 // which are this machine's folders, are left as they were.
-export function remember(prefs, { kind, profile, repo, drafts, agent = "claude", recent = true }) {
+export function remember(prefs, { kind, profile, repo, drafts, agent = "claude", recent = true, where }) {
   const folders = recent ? [repo, ...(prefs?.folders ?? []).filter((f) => f !== repo)].slice(0, RECENT_MAX) : [...(prefs?.folders ?? [])];
-  const next = { profile: prefs?.profile ?? null, profiles: { ...(prefs?.profiles ?? {}) }, reviewProfiles: { ...(prefs?.reviewProfiles ?? {}) }, agent: prefs?.agent ?? null, drafts: { ...(prefs?.drafts ?? {}) }, folders };
+  const next = { profile: prefs?.profile ?? null, profiles: { ...(prefs?.profiles ?? {}) }, reviewProfiles: { ...(prefs?.reviewProfiles ?? {}) }, oneoffProfiles: { ...(prefs?.oneoffProfiles ?? {}) }, where: prefs?.where ?? null, agent: prefs?.agent ?? null, drafts: { ...(prefs?.drafts ?? {}) }, folders };
   if (kind === "captain") return next; // only the folder is remembered
   next.agent = agent;
   if (kind === "review") {
     if (drafts !== "direct") next.drafts[repo] = drafts;
     if (profile) next.reviewProfiles[agent] = reviewPart(profile);
+  }
+  else if (kind === "oneoff") {
+    if (profile) next.oneoffProfiles[agent] = oneoffPart(profile);
+    if (where) next.where = where;
   }
   else if (agent === "claude") next.profile = profile;
   else next.profiles[agent] = profile;
@@ -277,6 +302,9 @@ export function remember(prefs, { kind, profile, repo, drafts, agent = "claude",
 
 // The last review's profile with this agent, or null.
 export const lastReviewProfile = (prefs, agent) => prefs?.reviewProfiles?.[agent] ?? null;
+
+// The last one-off's profile with this agent, or null.
+export const lastOneoffProfile = (prefs, agent) => prefs?.oneoffProfiles?.[agent] ?? null;
 
 // The last profile used with this agent.
 export const lastProfile = (prefs, agent) => (agent === "claude" ? prefs?.profile : prefs?.profiles?.[agent]) ?? null;
