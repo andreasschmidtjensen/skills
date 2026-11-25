@@ -23,6 +23,7 @@ Make the change and commit it on the branch, staging only your own files by path
    - GitHub, PR asked for: `gh pr create` with a body as [finish.md](finish.md) step 2, shortened (what changed, how it was checked). Then `set-status.sh <run-directory> --pr <owner/repo> <url>`.
    - Otherwise (not GitHub, or no PR asked for): open no PR; after a push run `set-status.sh <run-directory> --pushed <branch>`.
 3. `where=checkout`: switch back to the original branch with `git switch <original>`, only if the checkout is clean apart from the `User changes:` in `plan.md` (`git switch` carries them along). If anything else changed (the user edited files meanwhile), or the switch fails, stay on the branch.
-4. Set the status `finished`. The finished message says what was done and, with no push, "branch is local, not pushed" with the branch name (with a push and no PR, "branch pushed, open the PR yourself"). If you stayed on the one-off branch, it also says "still on <branch>; switch back with `git switch <original>`".
+4. With `mytodo` (SKILL.md Invariants), add what is left for the user: for a branch that is local, "push `<branch>` and open the PR"; for a stay on the one-off branch, "switch back to `<original>`".
+5. Set the status `finished`. The finished message says what was done and, with no push, "branch is local, not pushed" with the branch name (with a push and no PR, "branch pushed, open the PR yourself"). If you stayed on the one-off branch, it also says "still on <branch>; switch back with `git switch <original>`".
 
 Questions, the inbox, autonomy and recovery work as in other runs.
