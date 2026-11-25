@@ -18,11 +18,11 @@ Make the change and commit it on the branch, staging only your own files by path
 
 ## 3. Finish
 
-1. Push the branch: `git push -u origin <branch>`.
-2. PR, unless the argument was `pr=no`. The remote is GitHub when `git remote get-url origin` contains `github.com`, or `gh repo view` works.
-   - GitHub: `gh pr create` with a body as [finish.md](finish.md) step 2, shortened (what changed, how it was checked). Then `set-status.sh <run-directory> --pr <owner/repo> <url>`.
-   - Not GitHub (Bitbucket and others), or `pr=no`: open no PR. Run `set-status.sh <run-directory> --pushed <branch>`.
+1. Never push, and open no PR, unless the user explicitly asked for it in their own words (a `pr=yes` argument or a message). Skipping this step is the default: the branch stays local, and the user pushes it.
+2. Only when the user asked for a push or PR: push the branch with `git push -u origin <branch>`. The remote is GitHub when `git remote get-url origin` contains `github.com`, or `gh repo view` works.
+   - GitHub, PR asked for: `gh pr create` with a body as [finish.md](finish.md) step 2, shortened (what changed, how it was checked). Then `set-status.sh <run-directory> --pr <owner/repo> <url>`.
+   - Otherwise (not GitHub, or no PR asked for): open no PR; after a push run `set-status.sh <run-directory> --pushed <branch>`.
 3. `where=checkout`: switch back to the original branch with `git switch <original>`, only if the checkout is clean apart from the `User changes:` in `plan.md` (`git switch` carries them along). If anything else changed (the user edited files meanwhile), or the switch fails, stay on the branch.
-4. Set the status `finished`. The finished message says what was done and, with no PR, "branch pushed, open the PR yourself" with the branch name. If you stayed on the one-off branch, it also says "still on <branch>; switch back with `git switch <original>`".
+4. Set the status `finished`. The finished message says what was done and, with no push, "branch is local, not pushed" with the branch name (with a push and no PR, "branch pushed, open the PR yourself"). If you stayed on the one-off branch, it also says "still on <branch>; switch back with `git switch <original>`".
 
 Questions, the inbox, autonomy and recovery work as in other runs.
