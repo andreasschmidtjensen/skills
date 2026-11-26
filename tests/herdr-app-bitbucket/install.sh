@@ -30,7 +30,7 @@ dockq='.children[2]'
 
 bash "$INST" >"$T/out" 2>&1
 check "install succeeds" '[ -f "$H/mods/bitbucket-prs/setup.sh" ] && [ -f "$H/mods/bitbucket-prs/.installed-by-install-bitbucket" ]'
-check "token prompt hides the input (ask ... secret)" 'grep -q "ask tok .* secret" "$SRC/setup.sh" || grep -q "ask tok .* secret" herdr-app/mods/bitbucket-prs/setup.sh'
+check "token prompt hides the input (ask ... secret)" 'grep -q "ask tok .* secret" herdr-app/mods/bitbucket-prs/setup.sh'
 check "all panel files installed" 'for f in main.js bb.js rows.js bb-fetch.sh refresh.svg mod.json setup.sh; do [ -f "$H/mods/bitbucket-prs/$f" ] || exit 1; done'
 check "column holds to-do on top, panel below" '[ "$(jq -c "$dockq | [.id, .type, (.children | map(.content.mod)), (.children | map(.size.weight)), .size]" "$L")" = "[\"bitbucket-prs-column\",\"column\",[\"my-todos\",\"bitbucket-prs\"],[1,1],{\"px\":368}]" ]'
 check "other blocks untouched" '[ "$(jq -c ".children[0:2]" "$L")" = "$(jq -c ".children[0:2]" "$T/orig.json")" ]'
