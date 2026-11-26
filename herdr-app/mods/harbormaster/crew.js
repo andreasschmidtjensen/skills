@@ -283,7 +283,8 @@ function boxActions(m, x, f, items) {
     const main = rec != null ? a.optionButton(rec) : a.replyBtn || null;
     const others = items.filter((y) => y.key !== "question");
     const extra = it.options.length - (rec != null ? 1 : 0) + (rec != null && a.replyBtn ? 1 : 0) + others.length;
-    const folded = h_flex().gap(10).items_center().flex_wrap().when(Boolean(main), (el) => el.child(main)).when(extra > 0, (el) => el.child(moreLink(extra)));
+    // Built only while folded: `main` can be Reply, which the unfolded row adds too, and an element takes one parent.
+    const folded = () => h_flex().gap(10).items_center().flex_wrap().when(Boolean(main), (el) => el.child(main)).when(extra > 0, (el) => el.child(moreLink(extra)));
     const all = more && v_flex().gap(6)
       .child(h_flex().flex_wrap().gap(6).items_center().children(it.options.map((_o, i) => a.optionButton(i))).when(Boolean(a.replyBtn), (el) => el.child(a.replyBtn)))
       .children(needLines(view, t, r, f, others, "sidebar", true))
@@ -291,7 +292,7 @@ function boxActions(m, x, f, items) {
         () => openOverlay({ mod: "harbormaster", kind: "dialog", width: 560, height: 700, props: runProps(r) }))).child(moreLink(0)));
     // A click in the reply field is typing, not a wish to open the orchestrator (the box's own click).
     const input = a.input && div().id(`${key}-reply`).on_click((_e, cx) => cx.stop_propagation()).child(a.input);
-    return [more ? all : folded, input || null, a.note || null, confirm].filter(Boolean);
+    return [more ? all : folded(), input || null, a.note || null, confirm].filter(Boolean);
   }
   // Request review was clicked: the picker opens in the box, in place of the one button.
   if (requestingFor(view, r, items)) return [...needLines(view, t, r, f, items, "sidebar"), confirm].filter(Boolean);
