@@ -307,3 +307,91 @@ test("Project build lookups are capped per scan: reviewing rows plus 10 others",
   assert.ok(r.project.filter((x) => x.reviewing).every((x) => x.build === "ok"));
   assert.equal(n("/pullrequests?"), 25);
 });
+
+// ---- repo allowlist (the chooser) -----------------------------------------------------------
+
+function bigProject(n = 53) {
+  const repos = { values: Array.from({ length: n }, (_, i) => ({ slug: `r${i}`, updated_on: "x" })) };
+  const prs = (path) => {
+    const slug = /repositories\/acme\/(r\d+)\//.exec(path)[1];
+    return { values: Number(slug.slice(1)) < 6 ? fx("repo-app-prs").values.map((v) => ({ ...v, id: v.id + Number(slug.slice(1)) * 100, destination: { ...v.destination, repository: { full_name: `acme/${slug}` } } })) : [] };
+  };
+  return fake({ "/repositories/acme?": repos, "/pullrequests?": prs, "/pullrequests/%7B": { values: [] } });
+}
+const repoCalls = (calls) => calls.filter((x) => /\/repositories\/acme\/r\d+\/pullrequests\?/.test(x));
+
+test("allowlist: 3 of 53 repos -> first scan makes <= 3 repo calls; To review = reviewing rows", async () => {
+  const { f, calls } = bigProject(); const c = clock();
+  const p = createPoller({ fetch: f, workspace: "acme", project: "WEB", repos: ["r0", "r1", "r40"], now: c.now });
+  const r = await p.poll();
+  assert.equal(repoCalls(calls).length, 3);
+  assert.deepEqual([...new Set(r.project.map((x) => x.repo))].sort(), ["r0", "r1"]);
+  assert.deepEqual(r.project.filter((x) => x.reviewing).map((x) => `${x.repo}#${x.id}`), ["r0#21", "r1#121"]);
+  assert.equal(calls.filter((x) => x.startsWith("/repositories/acme?")).length, 1);
+});
+
+test("allowlist: slugs that no longer exist are ignored; Mine is not limited", async () => {
+  const { f, calls } = fake({ "q=project": fx("repos") });
+  const p = createPoller({ fetch: f, workspace: "acme", project: "WEB", repos: ["api", "gone"], now: clock().now });
+  const r = await p.poll();
+  assert.deepEqual(repoCalls(calls), []);
+  assert.deepEqual(calls.filter((x) => /\/pullrequests\?/.test(x)).map((x) => /acme\/(\w+)\//.exec(x)[1]), ["api"]);
+  assert.deepEqual(r.mine.map((x) => x.id), [7], "Mine shows the app PR although only api is chosen");
+});
+
+test("repoList fetches the list before any scan, sorted, once (cached)", async () => {
+  const { f, calls } = bigProject(12); const c = clock();
+  const p = createPoller({ fetch: f, workspace: "acme", now: c.now });
+  const [a, b] = await Promise.all([p.repoList(), p.repoList()]);
+  assert.deepEqual(a.repos, Array.from({ length: 12 }, (_, i) => `r${i}`).sort());
+  assert.deepEqual(b, a);
+  assert.deepEqual(calls, [calls[0]], "one request for two callers, no user/PR calls");
+  await p.repoList();
+  assert.equal(calls.length, 1);
+  assert.equal((await createPoller({ fetch: async () => ({ error: { kind: "http", status: 500 } }), workspace: "acme", now: c.now }).repoList()).error.status, 500);
+});
+
+test("setRepos: removing a repo drops its rows at once, adding one scans it on the next poll", async () => {
+  const { f, calls } = bigProject(); const c = clock();
+  const p = createPoller({ fetch: f, workspace: "acme", project: "WEB", repos: ["r0", "r1"], now: c.now });
+  let r = await p.poll();
+  assert.deepEqual([...new Set(r.project.map((x) => x.repo))].sort(), ["r0", "r1"]);
+  p.setRepos(["r0", "r3"]);
+  const n = calls.length;
+  assert.deepEqual([...new Set((await p.poll({ force: false })).project.map((x) => x.repo))].sort(), ["r0", "r3"], "r1 gone, r3 scanned although 5 min have not passed");
+  assert.ok(repoCalls(calls.slice(n)).some((x) => x.includes("/r3/")));
+  assert.ok(!repoCalls(calls.slice(n)).some((x) => x.includes("/r2/")));
+  p.setRepos(["r0"]);
+  assert.deepEqual([...new Set((await p.poll({ force: true })).project.map((x) => x.repo))], ["r0"]);
+  p.setRepos(null);
+  r = await p.poll({ force: true });
+  assert.equal(new Set(r.project.map((x) => x.repo)).size, 6, "null = all repos again");
+});
+
+test("three chosen repos of a project count as few: scan every 60 s", async () => {
+  const { f, calls } = bigProject(); const c = clock();
+  const p = createPoller({ fetch: f, workspace: "acme", project: "WEB", repos: ["r0", "r1", "r2"], now: c.now });
+  await p.poll(); const n = repoCalls(calls).length;
+  c.t += 61_000; await p.poll();
+  assert.ok(repoCalls(calls).length > n, "rescans after 61 s because few repos are chosen");
+});
+
+test("setRepos during an in-flight scan is not undone by it", async () => {
+  const { f } = bigProject(); const c = clock();
+  let release; const gate = new Promise((r) => { release = r; });
+  let hold = false;
+  const slow = async (path) => { if (hold && /\/repositories\/acme\/r0\/pullrequests\?/.test(path)) await gate; return f(path); };
+  const p = createPoller({ fetch: slow, workspace: "acme", project: "WEB", repos: ["r0", "r1"], now: c.now });
+  await p.poll();
+  hold = true; c.t += 61_000;
+  const running = p.poll({ force: true });
+  await new Promise((r) => setImmediate(r));
+  p.setRepos(["r1", "r3"]); // r0 dropped, r3 added while the scan of r0 is pending
+  release();
+  const mid = await running;
+  assert.ok(!mid.project.some((x) => x.repo === "r0"), "dropped repo's rows do not come back");
+  hold = false;
+  const after = await p.poll(); // not forced: still scans the added repo at once
+  assert.ok(after.project.some((x) => x.repo === "r3"), "added repo scanned on the next poll");
+  assert.ok(!after.project.some((x) => x.repo === "r0"));
+});

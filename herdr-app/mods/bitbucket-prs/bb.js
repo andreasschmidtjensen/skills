@@ -21,6 +21,8 @@
 //   GET /repositories/{ws}?q=project.key="KEY", cached 1h). Few repos -> Project can run every 60 s
 //   (<= PROJECT_FAST_MAX_REPOS repos: <= 5 calls/min worst case = 300/h + Mine 60/h + builds, under the cap);
 //   more repos fall back to the 5 min cadence.
+// `repos` (createPoller option, poller.setRepos) is an allowlist of slugs: Project / To review scan only
+//   those (Mine is not limited by it); null = every repo of the project. The cadence above counts chosen repos.
 
 export const API = "https://api.bitbucket.org/2.0";
 export const MINE_EVERY_MS = 60_000;
@@ -163,15 +165,21 @@ export function repoScanStrategy() {
 /**
  * createPoller({fetch, workspace, now, projectStrategy, hourlyCap})
  * poll({force}) runs whatever is due and returns {mine, project, state}.
+ * repoList() -> {repos:[slug...]} | {error}: the project's repos (cached 1h; fetched even before any scan).
+ * setRepos(list|null): choose the repos Project scans; rows of dropped repos go at once, the next poll scans new ones.
  * state = {status: ok|setup|auth|throttled|error, nextAt, message}. Call poll() as often as you like
  * (e.g. every 60 s while visible); it only hits the API when something is due.
  */
-export function createPoller({ fetch, workspace, project = "", now = Date.now, projectStrategy = repoScanStrategy(), hourlyCap = HOURLY_CAP }) {
+export function createPoller({ fetch, workspace, project = "", repos = null, now = Date.now, projectStrategy = repoScanStrategy(), hourlyCap = HOURLY_CAP }) {
   const wsLower = workspace.toLowerCase();
   let me = null;
   let mineAt = -Infinity;
   let reviewAt = -Infinity;
   let repoCache = null; // {repos, at}
+  let gen = 0; // bumped by setRepos: a scan that started under an older choice must not undo it
+  let listing = null; // in-flight repo list request, shared by concurrent callers
+  let allow = repos ? new Set(repos) : null; // chosen slugs, null = all
+  const chosen = (list) => (allow ? list.filter((x) => allow.has(x.slug)) : list);
   let backoffMs = 0;
   const log = [];
   const builds = new Map(); // "full#id" -> {updatedOn, build}
@@ -195,12 +203,21 @@ export function createPoller({ fetch, workspace, project = "", now = Date.now, p
   async function listRepos() {
     const t = now();
     if (repoCache && t - repoCache.at < REPO_LIST_TTL_MS) return { repos: repoCache.repos };
-    const l = await listPages(urlRepos(workspace, project), 5);
-    if (l.error) return repoCache && l.error.kind === "budget" ? { repos: repoCache.repos } : { error: l.error };
-    repoCache = { repos: l.values.map((v) => ({ slug: v.slug, updatedOn: v.updated_on || "" })), at: t };
-    return { repos: repoCache.repos };
+    if (listing) return listing;
+    listing = (async () => {
+      const l = await listPages(urlRepos(workspace, project), 5);
+      if (l.error) return repoCache && l.error.kind === "budget" ? { repos: repoCache.repos } : { error: l.error };
+      repoCache = { repos: l.values.map((v) => ({ slug: v.slug, updatedOn: v.updated_on || "" })), at: t };
+      return { repos: repoCache.repos };
+    })().finally(() => { listing = null; });
+    return listing;
   }
-  const reviewEvery = () => (project && repoCache && repoCache.repos.length > PROJECT_FAST_MAX_REPOS ? REVIEW_EVERY_MS : project ? MINE_EVERY_MS : REVIEW_EVERY_MS);
+  /** The repo list the Project scan sees: only the chosen repos. */
+  async function scanRepos() {
+    const l = await listRepos();
+    return l.error ? l : { repos: chosen(l.repos) };
+  }
+  const reviewEvery = () => (project && repoCache && chosen(repoCache.repos).length > PROJECT_FAST_MAX_REPOS ? REVIEW_EVERY_MS : project ? MINE_EVERY_MS : REVIEW_EVERY_MS);
 
   function fail(err, t) {
     const status = err.status || 0;
@@ -296,8 +313,9 @@ export function createPoller({ fetch, workspace, project = "", now = Date.now, p
     }
     if (reviewDue) {
       const rcall = (path) => call(path, MINE_RESERVE);
-      const s = await projectStrategy({ call: rcall, listRepos, ws: workspace, me, now });
-      if (isBudget(s.error)) { reviewAt = t; notice = BUDGET_NOTICE; }
+      const gen0 = gen;
+      const s = await projectStrategy({ call: rcall, listRepos: scanRepos, ws: workspace, me, now });
+      if (isBudget(s.error)) { if (gen === gen0) reviewAt = t; notice = BUDGET_NOTICE; }
       else if (s.error) return fail(s.error, t), snap();
       else {
         if (s.partial) notice = BUDGET_NOTICE;
@@ -311,8 +329,10 @@ export function createPoller({ fetch, workspace, project = "", now = Date.now, p
         const r = await toRows(open, t, MINE_RESERVE, lookup);
         if (r.error) return fail(r.error, t), snap();
         for (const row of r.rows) row.reviewing = isToReview(byKey.get(`${row.fullName}#${row.id}`), me);
-        out.project = r.rows;
-        reviewAt = t;
+        // The choice changed while scanning: keep only the repos chosen now and leave reviewAt alone
+        // (setRepos set it to -Infinity), so the next poll scans the newly added repos.
+        out.project = gen === gen0 ? r.rows : r.rows.filter((x) => !allow || allow.has(x.repo));
+        if (gen === gen0) reviewAt = t;
       }
     }
     backoffMs = 0;
@@ -320,5 +340,17 @@ export function createPoller({ fetch, workspace, project = "", now = Date.now, p
     return snap();
   }
 
-  return { poll, requestsLastHour: () => log.filter((x) => now() - x < 3_600_000).length };
+  async function repoList() {
+    const l = await listRepos();
+    return l.error ? l : { repos: l.repos.map((x) => x.slug).sort() };
+  }
+
+  function setRepos(list) {
+    allow = list ? new Set(list) : null;
+    gen++;
+    out.project = out.project.filter((r) => !allow || allow.has(r.repo));
+    reviewAt = -Infinity; // the next poll scans again (new repos at once)
+  }
+
+  return { poll, repoList, setRepos, requestsLastHour: () => log.filter((x) => now() - x < 3_600_000).length };
 }

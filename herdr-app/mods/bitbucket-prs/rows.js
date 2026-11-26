@@ -52,3 +52,63 @@ export function openCommand(url, platform) {
   if (!/^https?:\/\//.test(url || "")) return null;
   return [platform === "macos" ? "open" : platform === "windows" ? "explorer" : "xdg-open", [url]];
 }
+
+// ---- tabs -------------------------------------------------------------------------------
+
+export const TABS = [["mine", "Mine"], ["review", "To review"], ["project", "Project"]];
+export const REVIEW_EMPTY_TEXT = "Nothing waiting for your review";
+
+/** Rows of a tab: To review is the Project rows with `reviewing` (same data, no extra requests). */
+export function tabRows(data, tab) {
+  if (tab === "mine") return data?.mine ?? [];
+  const project = data?.project ?? [];
+  return tab === "review" ? project.filter((r) => r.reviewing) : project;
+}
+
+export function emptyText(tab) {
+  return tab === "project" ? EMPTY_TEXT : tab === "review" ? REVIEW_EMPTY_TEXT : "No open pull requests";
+}
+
+// ---- repo chooser -----------------------------------------------------------------------
+
+/** Slugs from the `repos=` config line (comma separated), or null when there is no such line (= all repos). */
+export function reposFrom(configText) {
+  const m = /^repos=(.*)$/m.exec(configText || "");
+  return m ? m[1].replace(/\r$/, "").split(",").map((s) => s.trim()).filter(Boolean) : null;
+}
+
+/** Config text with the `repos=` line set to `slugs` (null = no line = all repos); every other line is kept as it is. */
+export function withRepos(configText, slugs) {
+  const lines = (configText || "").split("\n").filter((l) => !/^repos=/.test(l));
+  while (lines.length && lines[lines.length - 1] === "") lines.pop();
+  if (slugs) lines.push(`repos=${slugs.join(",")}`);
+  return lines.length ? `${lines.join("\n")}\n` : "";
+}
+
+/** Reads the config file and fails (non-zero) when it cannot be read. */
+export const READ_CONFIG_SH = 'cat "${XDG_CONFIG_HOME:-$HOME/.config}/bitbucket-prs/config"';
+
+/** A config we may rewrite: it was read and has a workspace (never save a config that is only repos=). */
+export const canSaveConfig = (text) => /^workspace=\S/m.test(text || "");
+
+/** sh script: `sh -c WRITE_CONFIG_SH sh <new text>` replaces the config file atomically, mode 600. */
+export const WRITE_CONFIG_SH = 'd="${XDG_CONFIG_HOME:-$HOME/.config}/bitbucket-prs"; mkdir -p "$d" && umask 077 && t=$(mktemp "$d/.config.XXXXXX") && printf %s "$1" > "$t" && chmod 600 "$t" && mv "$t" "$d/config" || { rm -f "$t"; exit 1; }';
+
+export const isChosen = (chosen, slug) => !chosen || chosen.includes(slug);
+
+/** Number of listed repos that are chosen ("n of N repos"); unknown slugs in `chosen` do not count. */
+export const chosenCount = (chosen, all) => (chosen ? all.filter((s) => chosen.includes(s)).length : all.length);
+
+/** New choice after ticking/unticking `slug`; null (= all) when every repo ends up chosen. */
+export function toggleRepo(chosen, all, slug) {
+  const on = new Set(chosen ?? all);
+  if (on.has(slug)) on.delete(slug); else on.add(slug);
+  const next = all.filter((s) => on.has(s));
+  return next.length === all.length ? null : next;
+}
+
+/** True when two choices (list or null = all) pick the same repos. */
+export function sameChoice(a, b) {
+  if (!a || !b) return !a && !b;
+  return a.length === b.length && a.every((s) => b.includes(s));
+}

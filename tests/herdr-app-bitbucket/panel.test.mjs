@@ -45,3 +45,77 @@ test("openCommand", () => {
   assert.deepEqual(openCommand("https://x.test/a", "linux"), ["xdg-open", ["https://x.test/a"]]);
   assert.equal(openCommand("javascript:1", "macos"), null);
 });
+
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync, readFileSync, statSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { tabRows, emptyText, REVIEW_EMPTY_TEXT, TABS, reposFrom, withRepos, WRITE_CONFIG_SH, canSaveConfig, isChosen, chosenCount, toggleRepo, sameChoice } from "../../herdr-app/mods/bitbucket-prs/rows.js";
+
+test("tabs: Mine | To review | Project; To review = reviewing Project rows", () => {
+  assert.deepEqual(TABS.map((t) => t[1]), ["Mine", "To review", "Project"]);
+  const data = { mine: [{ id: 1 }], project: [{ id: 2, reviewing: true }, { id: 3, reviewing: false }, { id: 4, reviewing: true }] };
+  assert.deepEqual(tabRows(data, "mine").map((r) => r.id), [1]);
+  assert.deepEqual(tabRows(data, "review").map((r) => r.id), [2, 4]);
+  assert.deepEqual(tabRows(data, "project").map((r) => r.id), [2, 3, 4]);
+  assert.deepEqual(tabRows({}, "review"), []);
+  assert.equal(emptyText("review"), "Nothing waiting for your review");
+  assert.equal(REVIEW_EMPTY_TEXT, emptyText("review"));
+  assert.equal(emptyText("project"), EMPTY_TEXT);
+  assert.equal(emptyText("mine"), "No open pull requests");
+});
+
+test("reposFrom: no line = null (all), empty = none, else the slugs", () => {
+  assert.equal(reposFrom("workspace=acme\nemail=kim@example.com\n"), null);
+  assert.deepEqual(reposFrom("workspace=acme\nrepos=app, api ,lib\r\nemail=x"), ["app", "api", "lib"]);
+  assert.deepEqual(reposFrom("repos=\n"), []);
+});
+
+test("withRepos replaces/adds/removes only the repos= line", () => {
+  const cfg = "workspace=acme\nemail=kim@example.com\nproject=WEB\n";
+  assert.equal(withRepos(cfg, ["app", "api"]), `${cfg}repos=app,api\n`);
+  assert.equal(withRepos(`${cfg}repos=old\n`, ["lib"]), `${cfg}repos=lib\n`);
+  assert.equal(withRepos("workspace=acme\nrepos=old\nemail=kim@example.com", ["x"]), "workspace=acme\nemail=kim@example.com\nrepos=x\n");
+  assert.equal(withRepos(`${cfg}repos=old\n`, null), cfg);
+  assert.equal(withRepos(cfg, []), `${cfg}repos=\n`);
+  assert.equal(withRepos("", null), "");
+});
+
+test("chooser helpers", () => {
+  const all = ["a", "b", "c"];
+  assert.equal(isChosen(null, "a"), true);
+  assert.equal(isChosen(["b"], "a"), false);
+  assert.equal(chosenCount(null, all), 3);
+  assert.equal(chosenCount(["a", "gone"], all), 1);
+  assert.deepEqual(toggleRepo(null, all, "b"), ["a", "c"]);
+  assert.deepEqual(toggleRepo(["a"], all, "c"), ["a", "c"]);
+  assert.equal(toggleRepo(["a", "b"], all, "c"), null, "everything ticked = all");
+  assert.deepEqual(toggleRepo(["a"], all, "a"), []);
+  assert.equal(sameChoice(null, null), true);
+  assert.equal(sameChoice(null, ["a"]), false);
+  assert.equal(sameChoice(["a", "b"], ["b", "a"]), true);
+});
+
+test("WRITE_CONFIG_SH writes the config atomically, mode 600, other lines kept", () => {
+  const dir = mkdtempSync(join(tmpdir(), "bbcfg-"));
+  try {
+    const env = { ...process.env, XDG_CONFIG_HOME: dir };
+    const text = withRepos("workspace=acme\nemail=kim@example.com\n", ["app", "api"]);
+    execFileSync("sh", ["-c", WRITE_CONFIG_SH, "sh", text], { env });
+    const file = join(dir, "bitbucket-prs", "config");
+    assert.equal(readFileSync(file, "utf8"), "workspace=acme\nemail=kim@example.com\nrepos=app,api\n");
+    assert.equal(statSync(file).mode & 0o777, 0o600);
+    execFileSync("sh", ["-c", WRITE_CONFIG_SH, "sh", withRepos(readFileSync(file, "utf8"), null)], { env });
+    assert.equal(readFileSync(file, "utf8"), "workspace=acme\nemail=kim@example.com\n");
+    assert.equal(statSync(file).mode & 0o777, 0o600);
+    assert.deepEqual(execFileSync("ls", ["-A", join(dir, "bitbucket-prs")], { env }).toString().trim().split("\n"), ["config"], "no temp file left");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("canSaveConfig: only a config with a workspace may be rewritten", () => {
+  assert.equal(canSaveConfig("workspace=acme\nemail=kim@example.com\n"), true);
+  assert.equal(canSaveConfig(""), false);
+  assert.equal(canSaveConfig(null), false);
+  assert.equal(canSaveConfig("repos=app\n"), false);
+  assert.equal(canSaveConfig("workspace=\nrepos=app\n"), false);
+});

@@ -5,7 +5,8 @@
 #                     them, `-` clears the project key (= whole workspace). Writes
 #                     the config file (mode 600, no token in it), stores the token in the Keychain
 #   setup.sh status   shows what is configured, never the token
-# Config: ${XDG_CONFIG_HOME:-~/.config}/bitbucket-prs/config (workspace=, email=, project=).
+# Config: ${XDG_CONFIG_HOME:-~/.config}/bitbucket-prs/config (workspace=, email=, project=, and
+# repos=a,b written by the panel's Repos chooser; `token` keeps an existing repos= line unless the project changes).
 # Keychain: service bitbucket-prs, account = the email.
 # For tests: BB_SETUP_WORKSPACE, BB_SETUP_EMAIL, BB_SETUP_PROJECT, BB_SETUP_TOKEN skip the prompts;
 # BB_KEYCHAIN=none skips the real Keychain.
@@ -52,10 +53,12 @@ case "${1:-}" in
     case "$tok" in *\"*|*\\*|*"
 "*) echo "the token has a character (quote, backslash, line break) this script can't pass on; paste it as is from Bitbucket" >&2; exit 2 ;; esac
     old=$(get email)
+    old_proj=$(get project)
+    repos_line=$(sed -n '/^repos=/p' "$cfg" 2>/dev/null | head -n 1)
     mkdir -p "$cfgdir" && chmod 700 "$cfgdir" 2>/dev/null
     tmp=$(mktemp "$cfgdir/.config.XXXXXX") || exit 1
     chmod 600 "$tmp"
-    { printf 'workspace=%s\nemail=%s\n' "$ws" "$email"; [ -z "$proj" ] || printf 'project=%s\n' "$proj"; } > "$tmp" && mv "$tmp" "$cfg" || { rm -f "$tmp"; exit 1; }
+    { printf 'workspace=%s\nemail=%s\n' "$ws" "$email"; [ -z "$proj" ] || printf 'project=%s\n' "$proj"; [ -z "$repos_line" ] || [ "$old_proj" != "$proj" ] || printf '%s\n' "$repos_line"; } > "$tmp" && mv "$tmp" "$cfg" || { rm -f "$tmp"; exit 1; }
     chmod 600 "$cfg"
     if [ "${BB_KEYCHAIN:-}" = none ]; then
       echo "config written; Keychain skipped (BB_KEYCHAIN=none)"
@@ -80,6 +83,7 @@ case "${1:-}" in
     echo "workspace: ${ws:-missing}"
     echo "email: ${email:-missing}"
     echo "project: ${proj:-none (whole workspace)}"
+    if grep -q '^repos=' "$cfg"; then echo "repos: $(get repos | tr ',' '\n' | grep -c .) chosen"; else echo "repos: all"; fi
     if [ "${BB_KEYCHAIN:-}" = none ]; then echo "keychain: skipped (BB_KEYCHAIN=none)"
     elif [ -n "$email" ] && has_token_in_keychain "$email"; then echo "token: in the Keychain"
     else echo "token: not in the Keychain"; fi

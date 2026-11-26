@@ -8,9 +8,16 @@ on the right below My To-do. Read-only: a click opens the PR in the browser.
 The panel shares the right column with the My To-do block, half the height each; the
 column keeps the to-do block's 368px width.
 
-- **Tabs**: **Mine** (open PRs you wrote) and **Project** (all open PRs in the
-  project's repositories, newest first, as on Bitbucket's project page), each with its count.
-  Without a project key, Project covers the whole workspace.
+- **Tabs**: **Mine** (open PRs you wrote), **To review** (open PRs where you are a
+  reviewer and have not approved; empty: "Nothing waiting for your review") and **Project**
+  (all open PRs in the project's repositories, newest first, as on Bitbucket's project page),
+  each with its count. To review is the Project rows you are asked to review, so it costs no
+  extra requests. Without a project key, Project covers the whole workspace.
+- **Repos button** (list icon, left of refresh): swaps the list for a scrollable checklist of
+  the project's repositories (the workspace's without a project key) with **All**, **None**,
+  **Done** and an "n of N repos" line. Project and To review scan only the ticked repos;
+  Mine is not limited by it. Unticking drops that repo's rows at once; ticking one scans it
+  on the next poll, and **Done** forces a poll when the choice changed.
 - **Rows**: title, then "author · #id · repository · age" and "source → destination
   branch", plus build state, approvals and comment count. Drafts carry a **Draft** tag;
   PRs where you are a reviewer and have not approved carry a **review** marker.
@@ -39,10 +46,14 @@ column keeps the to-do block's 368px width.
     key, `-` clears it (whole workspace). The token is never remembered or shown.
   - The workspace and email go in `~/.config/bitbucket-prs/config` (or under
     `$XDG_CONFIG_HOME`), mode 600, as `workspace=`, `email=` and, if given, `project=`. The token is not in it.
+  - The Repos chooser saves its choice in the same file as one line `repos=slug1,slug2`
+    (comma-separated slugs). No line means all repos; `repos=` with nothing after it means none.
+    The panel rewrites the file atomically (mode 600) and keeps every other line; `setup.sh token`
+    keeps an existing `repos=` line too. Slugs that no longer exist are ignored.
   - The token goes in the macOS Keychain (service `bitbucket-prs`, account = your
     email). It is passed to `security -i` on stdin, so it never is on a command line.
   - Without a Keychain, set `BITBUCKET_PRS_TOKEN` in the environment Herdr runs in.
-  - `setup.sh status` shows what is configured, without the token.
+  - `setup.sh status` shows what is configured, without the token (`repos: n chosen` or `repos: all`).
 - **Install**: `herdr-app/install-bitbucket.sh` copies the mod and docks it.
   - It finds the layout with a `my-todos` block and wraps that block in a column
     (`bitbucket-prs-column`): to-do on top, this panel below, weight 1 each.
@@ -61,7 +72,7 @@ column keeps the to-do block's 368px width.
   - `bb.js`, `bb-fetch.sh`: the Bitbucket requests and their cache.
   - `rows.js`: the row layout.
   - `setup.sh`: the token setup.
-  - the icons (`.svg`).
+  - the icons (`repos.svg`, `refresh.svg`).
 - **`herdr-app/install-bitbucket.sh`**: the installer and dock.
 - **Bitbucket Cloud REST API 2.0**, with HTTP basic auth (email and API token).
 - **Programs:** `sh`, `curl`; `jq` for the installer; `security` for the Keychain (macOS).
@@ -87,7 +98,9 @@ column keeps the to-do block's 368px width.
 ## Done when
 
 - `install-bitbucket.sh` docks the panel below My To-do, and running it again changes nothing.
-- With a project key set, both tabs show only that project's repositories.
+- With a project key set, Project and To review show only that project's repositories.
+- The Repos chooser limits Project and To review to the ticked repos and survives a restart (`repos=`).
+- To review lists the Project rows you are asked to review.
 - With the workspace and token set up, Mine lists your open PRs with the fields above.
 - Project lists all open PRs (drafts included) with author and branches, and marks those you are asked to review.
 - A click on a row opens the PR in the browser.

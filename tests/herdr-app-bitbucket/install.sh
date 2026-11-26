@@ -31,7 +31,7 @@ dockq='.children[2]'
 bash "$INST" >"$T/out" 2>&1
 check "install succeeds" '[ -f "$H/mods/bitbucket-prs/setup.sh" ] && [ -f "$H/mods/bitbucket-prs/.installed-by-install-bitbucket" ]'
 check "token prompt hides the input (ask ... secret)" 'grep -q "ask tok .* secret" herdr-app/mods/bitbucket-prs/setup.sh'
-check "all panel files installed" 'for f in main.js bb.js rows.js bb-fetch.sh refresh.svg mod.json setup.sh; do [ -f "$H/mods/bitbucket-prs/$f" ] || exit 1; done'
+check "all panel files installed" 'for f in main.js bb.js rows.js bb-fetch.sh refresh.svg repos.svg mod.json setup.sh; do [ -f "$H/mods/bitbucket-prs/$f" ] || exit 1; done'
 check "column holds to-do on top, panel below" '[ "$(jq -c "$dockq | [.id, .type, (.children | map(.content.mod)), (.children | map(.size.weight)), .size]" "$L")" = "[\"bitbucket-prs-column\",\"column\",[\"my-todos\",\"bitbucket-prs\"],[1,1],{\"px\":368}]" ]'
 check "other blocks untouched" '[ "$(jq -c ".children[0:2]" "$L")" = "$(jq -c ".children[0:2]" "$T/orig.json")" ]'
 check "backup created, equals the original" 'set -- "$H"/layouts/team-main.json.bak-*; [ -f "$1" ] && cmp -s "$1" "$T/orig.json"'
@@ -121,6 +121,18 @@ check "setup: prompts show the previous values" 'grep -q "workspace[^:]*\[acme\]
 check "setup: previous token is never shown or asked as default" '! grep -q "sekret-token-123" "$T/out" && ! grep -q "token (not shown) \[" "$T/out"'
 printf '\n\n-\nsekret-token-123\n' | sh "$S" token >"$T/out" 2>&1
 check "setup: - clears the project" '! grep -q project "$C" && grep -q "workspace=acme" "$C"'
+sh "$S" status >"$T/out" 2>&1
+check "status: repos all without a repos= line" 'grep -q "^repos: all" "$T/out"' 
+printf 'repos=app,api,lib\n' >> "$C"
+sh "$S" status >"$T/out" 2>&1
+check "status: repos n chosen" 'grep -q "^repos: 3 chosen" "$T/out"'
+BB_SETUP_WORKSPACE=acme BB_SETUP_EMAIL=kim@example.com BB_SETUP_PROJECT= BB_SETUP_TOKEN=sekret-token-123 sh "$S" token >"$T/out" 2>&1
+check "setup: token keeps the repos= line when the project is unchanged" '[ "$(cat "$C")" = "workspace=acme
+email=kim@example.com
+repos=app,api,lib" ]'
+check "setup: config with repos= stays mode 600" '[ "$(ls -l "$C" | cut -c1-10)" = "-rw-------" ]'
+BB_SETUP_WORKSPACE=acme BB_SETUP_EMAIL=kim@example.com BB_SETUP_PROJECT=OPS BB_SETUP_TOKEN=sekret-token-123 sh "$S" token >"$T/out" 2>&1
+check "setup: a changed project drops the repos= line" '! grep -q "^repos=" "$C" && grep -q "^project=OPS" "$C"'
 rm -rf "$T/xdg"; sh "$S" status >"$T/out" 2>&1
 check "status without config" 'grep -q "config: none" "$T/out"'
 
