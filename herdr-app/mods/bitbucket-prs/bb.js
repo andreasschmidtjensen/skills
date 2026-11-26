@@ -34,7 +34,7 @@ export const SCOPE_HINT = "Check the API token scopes: read pull requests, read 
 // ---- URL builders -------------------------------------------------------------------------
 
 const PR_FIELDS = [
-  "id", "title", "state", "created_on", "updated_on", "comment_count", "task_count",
+  "id", "title", "state", "created_on", "updated_on", "comment_count",
   "author.uuid", "source.branch.name", "destination.repository.full_name", "links.html.href",
   "reviewers.uuid", "participants.role", "participants.approved", "participants.user.uuid",
 ].map((f) => `values.${f}`).concat("next").join(",");
@@ -136,6 +136,8 @@ export function repoScanStrategy() {
       const r = await ctx.call(urlRepoPrs(ctx.ws, repo.slug));
       if (r.error) {
         if (r.error.kind === "budget") { partial = true; break; } // keep last known data for the rest
+        // One repo that was deleted/renamed or lost PR read access is "no PRs", not a panel error.
+        if (r.error.status === 403 || r.error.status === 404) { info.set(repo.slug, { checkedAt: t, updatedOn: repo.updatedOn, prs: [] }); continue; }
         return { error: r.error };
       }
       info.set(repo.slug, { checkedAt: t, updatedOn: repo.updatedOn, prs: r.values || [] });
@@ -156,6 +158,7 @@ export function repoScanStrategy() {
  * (e.g. every 60 s while visible); it only hits the API when something is due.
  */
 export function createPoller({ fetch, workspace, project = "", now = Date.now, reviewStrategy = repoScanStrategy(), hourlyCap = HOURLY_CAP }) {
+  const wsLower = workspace.toLowerCase();
   let me = null;
   let mineAt = -Infinity;
   let reviewAt = -Infinity;
@@ -270,11 +273,11 @@ export function createPoller({ fetch, workspace, project = "", now = Date.now, r
         const rl = await listRepos();
         if (isBudget(rl.error)) return skip();
         if (rl.error) return fail(rl.error, t), snap();
-        allowed = new Set(rl.repos.map((x) => `${workspace}/${x.slug}`));
+        allowed = new Set(rl.repos.map((x) => `${wsLower}/${x.slug}`.toLowerCase()));
       }
       const prs = l.values.filter((p) => {
-        const full = p.destination?.repository?.full_name || "";
-        return allowed ? allowed.has(full) : full.startsWith(`${workspace}/`);
+        const full = (p.destination?.repository?.full_name || "").toLowerCase();
+        return allowed ? allowed.has(full) : full.startsWith(`${wsLower}/`);
       });
       const r = await toRows(prs, t);
       if (r.error) return fail(r.error, t), snap();

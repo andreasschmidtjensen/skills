@@ -22,6 +22,8 @@ column keeps the to-do block's 368px width.
 
 - Polls every 60 seconds while the window is visible, and on the refresh button.
   No toasts.
+- **Mine** refreshes every 60 s. **To review** refreshes every 5 min (60 s with a project of ≤5 repos).
+- PRs you already approved drop off **To review**.
 - Open PRs only, one workspace. With a **project key** in the config, both tabs only
   cover that Bitbucket project's repositories, which also lowers the request cost.
   Without one, the whole workspace.
@@ -52,19 +54,24 @@ column keeps the to-do block's 368px width.
 - **`herdr-app/mods/bitbucket-prs/`**, with `mod.json` set to `{"place": "right", "size": 368}`:
   - `main.js`: the panel.
   - `bb.js`, `bb-fetch.sh`: the Bitbucket requests and their cache.
+  - `rows.js`: the row layout.
   - `setup.sh`: the token setup.
   - the icons (`.svg`).
 - **`herdr-app/install-bitbucket.sh`**: the installer and dock.
 - **Bitbucket Cloud REST API 2.0**, with HTTP basic auth (email and API token).
 - **Programs:** `sh`, `curl`; `jq` for the installer; `security` for the Keychain (macOS).
-- **Test:** `sh tests/herdr-app-bitbucket/install.sh` (a throwaway app home, fixture layouts).
+- **Tests:**
+  - `node --test tests/herdr-app-bitbucket/bb.test.mjs tests/herdr-app-bitbucket/panel.test.mjs`
+  - `sh tests/herdr-app-bitbucket/bb-fetch.test.sh`
+  - `sh tests/herdr-app-bitbucket/install.sh` (a throwaway app home, fixture layouts).
 
 ## Watch out
 
 - **Rate limit:** 1000 requests an hour for the token. The panel's volume is kept well
-  under it; a 429 shows a notice and pauses polling.
+  under it; a 429 shows a notice and pauses polling. The panel caps itself at 500
+  requests an hour per Herdr window running it; one window is assumed.
 - **Token scopes:** create the API token with read access to pull requests and
-  repositories (and to your account, for the To review tab). A token that is too
+  repositories (and to your account: both tabs need it). A token that is too
   narrow shows as a rejected-token message in the panel.
 - **To review:** Bitbucket Cloud has no single call for "PRs where I am a reviewer"
   across a workspace, so that tab is found another way and may lag Mine slightly.

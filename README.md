@@ -49,6 +49,7 @@ Run the `herdr-app` tests from an agent in a Herdr app tab, with the window open
 
 - `tests/herdr-app-orchestrator/agent-kinds-live.sh` starts a hidden agent of each kind, delivers a task, and receives its report, including Claude's trust prompt and default permission mode. It uses Haiku, and `ollama/ornith-1.5:9b` for `pi` and `opencode`.
 - `sh tests/herdr-app-todo/cli.sh` and `node --test tests/herdr-app-todo/tree.test.mjs` check the `mytodo` command and the panel's item logic; they need no Herdr window.
+- `node --test tests/herdr-app-bitbucket/bb.test.mjs tests/herdr-app-bitbucket/panel.test.mjs`, `sh tests/herdr-app-bitbucket/bb-fetch.test.sh` and `sh tests/herdr-app-bitbucket/install.sh` check the Bitbucket PRs panel (request logic, rows, fetch script, installer); they need no Herdr window or token. `node --test` on the bare folder does not work.
 - `tests/herdr-app-captain/runs-live.sh` checks run directories, tab names, parked and closed runs and their resume, the integration worktree's space, the watcher and its `hc events` wake-up, and `--no-parent`, with plain programs in a throwaway space. It costs no model turns.
 - `tests/herdr-app-captain/runs-remote.sh` checks the captain's runs on another machine (`MACHINE`, default `local-ssh`): `runs.sh` listing them and saying when a machine cannot be read, `mark_run` and `post-message.sh` writing there, and the watcher, against a throwaway runs root on that machine. `--local` runs only the checks that need no other machine.
 

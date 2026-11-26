@@ -247,3 +247,37 @@ test("/user reply without uuid is an error, not a cached undefined", async () =>
   assert.equal(r.state.status, "error");
   assert.ok(!calls.some((x) => x.includes("undefined")));
 });
+
+test("one repo answering 404 or 403 counts as no PRs; panel stays ok and Mine refreshes", async () => {
+  const repos = { values: ["app", "gone", "locked"].map((slug) => ({ slug, updated_on: "2026-11-25T10:00:00+00:00" })) };
+  const { f, calls } = fake({
+    "/repositories/acme?": repos,
+    "/gone/pullrequests?": { error: { kind: "http", status: 404 } },
+    "/locked/pullrequests?": { error: { kind: "http", status: 403 } },
+  });
+  const c = clock();
+  const p = createPoller({ fetch: f, workspace: "acme", now: c.now });
+  let r = await p.poll();
+  assert.equal(r.state.status, "ok");
+  assert.deepEqual(r.mine.map((x) => x.id), [7]);
+  assert.deepEqual(r.review.map((x) => x.id), [21]);
+  const n = (s) => calls.filter((x) => x.includes(s)).length;
+  assert.equal(n("/gone/pullrequests?"), 1);
+  c.t += 60_000; r = await p.poll(); // Mine due again, To review not (5 min)
+  assert.equal(r.state.status, "ok");
+  assert.equal(n("/pullrequests/%7B"), 2, "Mine refreshed");
+  c.t += 300_000; r = await p.poll();
+  assert.equal(r.state.status, "ok");
+  assert.equal(n("/gone/pullrequests?"), 1, "failing repo is not retried until idle recheck");
+  assert.equal(n("/locked/pullrequests?"), 1);
+});
+
+test("workspace and repo slugs compare case-insensitively", async () => {
+  const run = async (project) => {
+    const { f } = fake(project ? { "q=project": fx("repos-project") } : {});
+    const p = createPoller({ fetch: f, workspace: "Acme", project, now: clock().now });
+    return (await p.poll()).mine.map((x) => x.id);
+  };
+  assert.deepEqual(await run(""), [7]);
+  assert.deepEqual(await run("ACME"), [7]);
+});
