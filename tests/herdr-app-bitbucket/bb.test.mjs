@@ -113,7 +113,7 @@ test("missing config/token -> setup state; 401 -> auth state naming scopes", asy
   assert.match(r.state.message, /token/);
   r = await createPoller({ fetch: async () => ({ error: { kind: "http", status: 401, retryAfter: null } }), workspace: "acme", now: clock().now }).poll();
   assert.equal(r.state.status, "auth");
-  assert.match(r.state.message, /read pull requests/);
+  assert.match(r.state.message, /read:user:bitbucket/);
   assert.doesNotMatch(JSON.stringify(r), /secret/);
 });
 

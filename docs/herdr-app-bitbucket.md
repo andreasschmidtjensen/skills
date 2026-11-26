@@ -73,9 +73,7 @@ column keeps the to-do block's 368px width.
 - **Rate limit:** 1000 requests an hour for the token. The panel's volume is kept well
   under it; a 429 shows a notice and pauses polling. The panel caps itself at 500
   requests an hour per Herdr window running it; one window is assumed.
-- **Token scopes:** create the API token with read access to pull requests and
-  repositories (and to your account: both tabs need it). A token that is too
-  narrow shows as a rejected-token message in the panel.
+- **Token scopes:** create the API token with exactly these scopes: `read:pullrequest:bitbucket`, `read:repository:bitbucket` and `read:user:bitbucket` (`read:account` and `read:me` do not cover it; both tabs need the user scope). Atlassian tokens cannot be edited, so a token with missing scopes means a new token and `setup.sh token` again. A token that is too narrow shows as a rejected-token message in the panel.
 - **Limits:** the Project tab shows at most 50 open PRs per repository (one page per repo). Build state on Project rows is looked up for the PRs you are asked to review plus up to 10 others per scan, so other rows may show no build dot for a few minutes.
 - **Project:** Bitbucket Cloud has no single call for all open PRs of a project, so the
   panel scans the repositories one by one; that tab may lag Mine slightly.
