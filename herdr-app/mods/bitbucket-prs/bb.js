@@ -34,7 +34,7 @@ export const MINE_RESERVE = 100; // of the cap, never spent by Project / its bui
 export const PROJECT_BUILD_LOOKUPS_PER_SCAN = 10; // non-reviewing Project rows whose build is looked up per scan
 export const MAX_REPO_CALLS_PER_SCAN = 25; // one scan never spends the hour; leftovers wait for the next scan
 export const BUDGET_NOTICE = "Request budget reached; showing the last data.";
-export const SCOPE_HINT = "The API token needs these scopes: read:pullrequest:bitbucket, read:repository:bitbucket and read:user:bitbucket (read:account and read:me are not enough). Create a new token with all three, then run setup.sh token.";
+export const SCOPE_HINT = "The API token needs these scopes: read:pullrequest:bitbucket, read:repository:bitbucket and read:user:bitbucket. Create a new token with all three, then run setup.sh token.";
 
 // ---- URL builders -------------------------------------------------------------------------
 
