@@ -11,11 +11,11 @@
 //                             Build state: 1 statuses call per PR whose updated_on changed, but per scan
 //                             only for `reviewing` rows plus <= PROJECT_BUILD_LOOKUPS_PER_SCAN (10) other
 //                             unknown rows (oldest first); the rest stay "none" until a later scan.
-//                             Worst case per scan: repo calls (<= 25) + reviewing + 10 statuses calls.
+//                             Worst case per scan: repo calls (<= 60, only the first sweep is that big) + reviewing + 10 statuses calls.
 //   Hard cap: HOURLY_CAP (500) requests in any sliding hour; beyond it work is skipped (never errors,
 //   state stays ok with a notice, last data kept). Project stops at cap - MINE_RESERVE so Mine keeps
 //   refreshing. A scan makes <= MAX_REPO_CALLS_PER_SCAN repo calls (never-checked / oldest first), which
-//   spreads big workspaces over several scans (25 * 12 = 300/h worst case).
+//   spreads big workspaces over several scans; after the first sweep a scan only rechecks active repos plus idle ones every 30 min (e.g. 53 repos, 3 active: 12 * (3 + 50/6) ~ 140 calls/h).
 // Requests are strictly sequential.
 // With config `project=KEY` both tabs are limited to that Bitbucket project's repos (found with
 //   GET /repositories/{ws}?q=project.key="KEY", cached 1h). Few repos -> Project can run every 60 s
@@ -32,7 +32,7 @@ export const HOURLY_CAP = 500;
 export const PROJECT_FAST_MAX_REPOS = 5;
 export const MINE_RESERVE = 100; // of the cap, never spent by Project / its build lookups
 export const PROJECT_BUILD_LOOKUPS_PER_SCAN = 10; // non-reviewing Project rows whose build is looked up per scan
-export const MAX_REPO_CALLS_PER_SCAN = 25; // one scan never spends the hour; leftovers wait for the next scan
+export const MAX_REPO_CALLS_PER_SCAN = 60; // the first scan of a ~50-repo project covers it all; leftovers of bigger ones wait for the next scan
 export const BUDGET_NOTICE = "Request budget reached; showing the last data.";
 export const SCOPE_HINT = "The API token needs these scopes: read:pullrequest:bitbucket, read:repository:bitbucket and read:user:bitbucket. Create a new token with all three, then run setup.sh token.";
 
@@ -47,7 +47,7 @@ const PR_FIELDS = [
 const enc = encodeURIComponent;
 export const fieldsParam = (fields) => `fields=${enc(fields)}`.replace(/%2C/g, ",").replace(/%2E/g, ".");
 export const urlUser = () => `/user?${fieldsParam("uuid,display_name")}`;
-export const urlMine = (uuid) => `/pullrequests/${enc(uuid)}?state=OPEN&pagelen=50&${fieldsParam(PR_FIELDS)}`;
+export const urlMine = (ws, uuid) => `/workspaces/${enc(ws)}/pullrequests/${enc(uuid)}?state=OPEN&pagelen=50&${fieldsParam(PR_FIELDS)}`;
 export const urlRepos = (ws, project) =>
   `/repositories/${enc(ws)}?pagelen=100${project ? `&q=${enc(`project.key="${project}"`)}` : ""}&${fieldsParam("values.slug,values.updated_on,next")}`;
 export const urlRepoPrs = (ws, repo) => `/repositories/${enc(ws)}/${enc(repo)}/pullrequests?state=OPEN&pagelen=50&${fieldsParam(PR_FIELDS)}`;
@@ -275,7 +275,7 @@ export function createPoller({ fetch, workspace, project = "", now = Date.now, p
       me = u.uuid;
     }
     if (mineDue) {
-      const l = await listPages(urlMine(me), 2);
+      const l = await listPages(urlMine(workspace, me), 2);
       if (isBudget(l.error)) return skip();
       if (l.error) return fail(l.error, t), snap();
       let allowed = null;

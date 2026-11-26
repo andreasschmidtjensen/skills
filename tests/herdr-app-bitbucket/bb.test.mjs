@@ -14,7 +14,7 @@ function fake(over = {}) {
     calls.push(path);
     for (const [k, v] of Object.entries(over)) if (path.includes(k)) return typeof v === "function" ? v(path) : v;
     if (path.startsWith("/user")) return fx("user");
-    if (path.startsWith("/pullrequests/")) return fx("mine");
+    if (path.includes("/pullrequests/%7B")) return fx("mine");
     if (path.startsWith("/repositories/acme?")) return fx("repos");
     if (path.includes("/app/pullrequests?")) return fx("repo-app-prs");
     if (path.includes("/api/pullrequests?")) return fx("repo-api-prs");
@@ -48,7 +48,7 @@ test("buildState from commit statuses", () => {
 });
 
 test("urls carry a fields filter", () => {
-  assert.match(urlMine(ME), /^\/pullrequests\/%7B1111[^?]+\?state=OPEN&pagelen=50&fields=values\.id,/);
+  assert.match(urlMine("acme", ME), /^\/workspaces\/acme\/pullrequests\/%7B1111[^?]+\?state=OPEN&pagelen=50&fields=values\.id,/);
   assert.match(urlRepoPrs("acme", "app"), /^\/repositories\/acme\/app\/pullrequests\?state=OPEN/);
 });
 
@@ -221,11 +221,11 @@ test("300 repos: budget is never an error and Mine still refreshes every 60s", a
   const p = createPoller({ fetch: f, workspace: "acme", now: c.now });
   let mineCalls = 0, notices = 0;
   for (let i = 0; i < 180; i++) { // three simulated hours
-    const before = calls.filter((x) => x.startsWith("/pullrequests/%7B")).length;
+    const before = calls.filter((x) => x.includes("/pullrequests/%7B")).length;
     const r = await p.poll();
     assert.equal(r.state.status, "ok", `minute ${i}: ${r.state.message}`);
     if (r.state.message) notices++;
-    mineCalls += calls.filter((x) => x.startsWith("/pullrequests/%7B")).length - before;
+    mineCalls += calls.filter((x) => x.includes("/pullrequests/%7B")).length - before;
     c.t += 60_000;
   }
   assert.equal(mineCalls, 180, "Mine listed every minute");
