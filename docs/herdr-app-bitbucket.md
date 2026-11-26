@@ -33,8 +33,10 @@ column keeps the to-do block's 368px width.
 - Stays far below Bitbucket's 1000 requests an hour: responses are cached, and a PR's
   build state is fetched again only when its `updated_on` changed.
 - **Setup**: `sh ~/.config/herdr-app/mods/bitbucket-prs/setup.sh token` asks for the
-  workspace slug, your Atlassian email, an optional project key (empty = whole
-  workspace) and an API token (typed silently).
+  workspace slug, your Atlassian email, an optional project key and an API token
+  (typed silently).
+  - Each prompt shows the previous value in [brackets]; Enter keeps it. For the project
+    key, `-` clears it (whole workspace). The token is never remembered or shown.
   - The workspace and email go in `~/.config/bitbucket-prs/config` (or under
     `$XDG_CONFIG_HOME`), mode 600, as `workspace=`, `email=` and, if given, `project=`. The token is not in it.
   - The token goes in the macOS Keychain (service `bitbucket-prs`, account = your

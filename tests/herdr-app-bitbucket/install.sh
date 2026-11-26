@@ -114,6 +114,13 @@ BB_SETUP_WORKSPACE='bad name' BB_SETUP_EMAIL=kim@example.com BB_SETUP_TOKEN=x sh
 check "setup: bad workspace rejected" '[ $rc = 2 ]'
 BB_SETUP_WORKSPACE=acme BB_SETUP_EMAIL=kim@example.com BB_SETUP_TOKEN='a"b' sh "$S" token >/dev/null 2>&1; rc=$?
 check "setup: token with a quote rejected" '[ $rc = 2 ]'
+cp "$C" "$T/config.before"
+printf '\n\n\nsekret-token-123\n' | sh "$S" token >"$T/out" 2>&1
+check "setup: Enter keeps the previous values" 'cmp -s "$C" "$T/config.before"'
+check "setup: prompts show the previous values" 'grep -q "workspace[^:]*\[acme\]" "$T/out" && grep -q "email[^:]*\[kim@example.com\]" "$T/out" && grep -q "key[^:]*\[WEB\]" "$T/out"'
+check "setup: previous token is never shown or asked as default" '! grep -q "sekret-token-123" "$T/out" && ! grep -q "token (not shown) \[" "$T/out"'
+printf '\n\n-\nsekret-token-123\n' | sh "$S" token >"$T/out" 2>&1
+check "setup: - clears the project" '! grep -q project "$C" && grep -q "workspace=acme" "$C"'
 rm -rf "$T/xdg"; sh "$S" status >"$T/out" 2>&1
 check "status without config" 'grep -q "config: none" "$T/out"'
 

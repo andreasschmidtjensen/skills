@@ -1,7 +1,8 @@
 #!/bin/sh
 # bitbucket-prs setup outside Herdr. macOS (Keychain); other systems use BITBUCKET_PRS_TOKEN.
-#   setup.sh token    asks for workspace, Atlassian email, an optional project key (empty =
-#                     whole workspace) and API token (silent), writes
+#   setup.sh token    asks for workspace, Atlassian email, an optional project key and API
+#                     token (silent); previous values are offered in [brackets], Enter keeps
+#                     them, `-` clears the project key (= whole workspace). Writes
 #                     the config file (mode 600, no token in it), stores the token in the Keychain
 #   setup.sh status   shows what is configured, never the token
 # Config: ${XDG_CONFIG_HOME:-~/.config}/bitbucket-prs/config (workspace=, email=, project=).
@@ -16,15 +17,17 @@ svc=bitbucket-prs
 # Value of key $1 from the config file.
 get() { sed -n "s/^$1=//p" "$cfg" 2>/dev/null | head -n 1; }
 
-# Prompt for $2 (label) into variable named $1; secret=1 turns echo off.
+# Prompt for $2 (label) into variable named $1; $3 = secret turns echo off; $4 is the
+# previous value, shown in [brackets] and kept when you just press Enter.
 ask() {
-  printf '%s: ' "$2" >&2
+  printf '%s%s: ' "$2" "${4:+ [$4]}" >&2
   if [ "${3:-}" = secret ] && [ -t 0 ]; then
     stty -echo 2>/dev/null; trap 'stty echo 2>/dev/null' EXIT INT TERM
     IFS= read -r v; stty echo 2>/dev/null; trap - EXIT INT TERM; echo >&2
   else
     IFS= read -r v
   fi
+  [ -n "$v" ] || v=${4:-}
   eval "$1=\$v"
 }
 
@@ -36,9 +39,9 @@ has_token_in_keychain() {
 case "${1:-}" in
   token)
     ws=${BB_SETUP_WORKSPACE:-}; email=${BB_SETUP_EMAIL:-}; tok=${BB_SETUP_TOKEN:-}; proj=${BB_SETUP_PROJECT:-}
-    [ -n "$ws" ] || ask ws "Bitbucket workspace (the slug in bitbucket.org/<workspace>)"
-    [ -n "$email" ] || ask email "Atlassian account email"
-    [ -n "${BB_SETUP_PROJECT+x}" ] || ask proj "Bitbucket project key (optional; empty = whole workspace)"
+    [ -n "$ws" ] || ask ws "Bitbucket workspace (the slug in bitbucket.org/<workspace>)" "" "$(get workspace)"
+    [ -n "$email" ] || ask email "Atlassian account email" "" "$(get email)"
+    [ -n "${BB_SETUP_PROJECT+x}" ] || ask proj "Bitbucket project key (optional; - = whole workspace)" "" "$(get project)"; [ "$proj" != "-" ] || proj=""
     [ -n "$tok" ] || ask tok "Bitbucket API token (not shown)" secret
     case "$ws" in ''|*[!A-Za-z0-9._-]*) echo "workspace must be a slug: letters, digits, . _ -" >&2; exit 2 ;; esac
     case "$email" in ''|*[!A-Za-z0-9._+@-]*|*@*@*|@*|*@) echo "that doesn't look like an email address" >&2; exit 2 ;; esac
