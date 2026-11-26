@@ -1,0 +1,10 @@
+{"values":[
+ {"id":7,"title":"Add retry to client","state":"OPEN","created_on":"2026-11-24T08:00:00.000000+00:00","updated_on":"2026-11-25T10:00:00.000000+00:00","comment_count":3,"task_count":0,
+  "author":{"uuid":"{11111111-aaaa-aaaa-aaaa-111111111111}"},"source":{"branch":{"name":"feature/retry"}},
+  "destination":{"repository":{"full_name":"acme/app"}},"links":{"html":{"href":"https://bitbucket.org/acme/app/pull-requests/7"}},
+  "reviewers":[{"uuid":"{22222222-bbbb-bbbb-bbbb-222222222222}"}],
+  "participants":[{"role":"REVIEWER","approved":true,"user":{"uuid":"{22222222-bbbb-bbbb-bbbb-222222222222}"}},{"role":"REVIEWER","approved":false,"user":{"uuid":"{33333333-cccc-cccc-cccc-333333333333}"}}]},
+ {"id":9,"title":"Other workspace PR","state":"OPEN","created_on":"2026-11-25T08:00:00.000000+00:00","updated_on":"2026-11-25T08:30:00.000000+00:00","comment_count":0,
+  "author":{"uuid":"{11111111-aaaa-aaaa-aaaa-111111111111}"},"source":{"branch":{"name":"fix/x"}},
+  "destination":{"repository":{"full_name":"other/thing"}},"links":{"html":{"href":"https://bitbucket.org/other/thing/pull-requests/9"}},"reviewers":[],"participants":[]}
+]}
