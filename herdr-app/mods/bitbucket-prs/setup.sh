@@ -39,7 +39,7 @@ case "${1:-}" in
     [ -n "$ws" ] || ask ws "Bitbucket workspace (the slug in bitbucket.org/<workspace>)"
     [ -n "$email" ] || ask email "Atlassian account email"
     [ -n "${BB_SETUP_PROJECT+x}" ] || ask proj "Bitbucket project key (optional; empty = whole workspace)"
-    [ -n "$tok" ] || ask tok "Bitbucket API token (not shown)"
+    [ -n "$tok" ] || ask tok "Bitbucket API token (not shown)" secret
     case "$ws" in ''|*[!A-Za-z0-9._-]*) echo "workspace must be a slug: letters, digits, . _ -" >&2; exit 2 ;; esac
     case "$email" in ''|*[!A-Za-z0-9._+@-]*|*@*@*|@*|*@) echo "that doesn't look like an email address" >&2; exit 2 ;; esac
     case "$email" in *@*) ;; *) echo "that doesn't look like an email address" >&2; exit 2 ;; esac
