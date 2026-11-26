@@ -39,7 +39,7 @@ To jump to plain terminals that wait on you (a command finished, a terminal exit
 
 To keep a to-do list per project that your agents fill in and tick (and the orchestrators use, when `mytodo` is installed), `herdr-app/install-todo.sh` installs the My To-do panel (see [docs/herdr-app-todo.md](docs/herdr-app-todo.md)); the `mytodo` command and its skill are in [`skills/mytodo`](skills/mytodo/SKILL.md).
 
-To see your open Bitbucket Cloud pull requests (Mine, To review) in the Herdr app, `herdr-app/install-bitbucket.sh` installs the Bitbucket PRs panel below the To-do one and `setup.sh token` stores your API token in the Keychain (see [docs/herdr-app-bitbucket.md](docs/herdr-app-bitbucket.md)).
+To see your open Bitbucket Cloud pull requests (Mine, and Project: all open PRs of the project, with a marker on those you are asked to review) in the Herdr app, `herdr-app/install-bitbucket.sh` installs the Bitbucket PRs panel below the To-do one and `setup.sh token` stores your API token in the Keychain (see [docs/herdr-app-bitbucket.md](docs/herdr-app-bitbucket.md)).
 
 > In the harbormaster mod's Crew block, put a ✓ before each orchestrator whose `run.status` label is `finished`.
 

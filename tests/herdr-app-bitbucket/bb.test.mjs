@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalisePr, buildState, formatAge, isToReview, createPoller, interpretFetch, urlRepos, urlMine, urlRepoPrs, repoScanStrategy, HOURLY_CAP } from "../../herdr-app/mods/bitbucket-prs/bb.js";
+import { normalisePr, buildState, formatAge, isToReview, createPoller, interpretFetch, urlRepos, urlMine, urlRepoPrs, repoScanStrategy, HOURLY_CAP, PROJECT_BUILD_LOOKUPS_PER_SCAN } from "../../herdr-app/mods/bitbucket-prs/bb.js";
 
 const fx = (n) => JSON.parse(readFileSync(new URL(`./fixtures/${n}.json`, import.meta.url), "utf8"));
 const ME = "{11111111-aaaa-aaaa-aaaa-111111111111}";
@@ -29,7 +29,7 @@ test("normalisePr maps a Bitbucket PR to a row", () => {
   const row = normalisePr(fx("mine").values[0], NOW, "ok");
   assert.deepEqual(row, { id: 7, title: "Add retry to client", repo: "app", fullName: "acme/app", branch: "feature/retry",
     url: "https://bitbucket.org/acme/app/pull-requests/7", approvals: 1, comments: 3, ageMs: NOW - Date.parse("2026-11-24T08:00:00Z"),
-    build: "ok", updatedOn: "2026-11-25T10:00:00.000000+00:00" });
+    build: "ok", updatedOn: "2026-11-25T10:00:00.000000+00:00", dest: "", author: "", draft: false, reviewing: false });
 });
 
 test("formatAge", () => {
@@ -65,7 +65,11 @@ test("Mine lists my open PRs in the configured workspace only", async () => {
   assert.equal(r.state.status, "ok");
   assert.deepEqual(r.mine.map((x) => x.id), [7]);
   assert.equal(r.mine[0].build, "ok");
-  assert.deepEqual(r.review.map((x) => x.id), [21]);
+  assert.deepEqual(r.project.map((x) => x.id), [24, 21, 22, 23], "all open PRs, newest first, incl. mine and drafts");
+  assert.deepEqual(r.project.map((x) => x.reviewing), [false, true, false, false], "marker: reviewer and not approved");
+  const d = r.project[0];
+  assert.deepEqual([d.draft, d.author, d.dest, d.branch], [true, "kim", "develop", "feature/d"]);
+  assert.deepEqual([r.project[1].draft, r.project[1].author, r.project[1].dest], [false, "anna", "main"]);
 });
 
 test("build status is fetched once per (id, updated_on)", async () => {
@@ -148,11 +152,11 @@ test("hard cap skips work instead of erroring", async () => {
   assert.notEqual(r.state.status, "throttled");
 });
 
-test("review strategy is replaceable", async () => {
+test("project strategy is replaceable", async () => {
   const c = clock(); const { f } = fake();
   const only = async () => ({ prs: [fx("repo-app-prs").values[0]] });
-  const r = await createPoller({ fetch: f, workspace: "acme", now: c.now, reviewStrategy: only }).poll();
-  assert.deepEqual(r.review.map((x) => x.id), [21]);
+  const r = await createPoller({ fetch: f, workspace: "acme", now: c.now, projectStrategy: only }).poll();
+  assert.deepEqual(r.project.map((x) => x.id), [21]);
 });
 
 test("repo list is cached for an hour; idle repos are rescanned rarely", async () => {
@@ -180,12 +184,12 @@ test("project: repos found via project query; Mine limited to those repos; scan 
   const r = await p.poll();
   assert.equal(r.state.status, "ok");
   assert.deepEqual(r.mine.map((x) => x.id), [7]);
-  assert.deepEqual(r.review.map((x) => x.id), [21]);
+  assert.deepEqual(r.project.map((x) => x.id), [24, 21, 22, 23]);
   assert.equal(calls.filter((x) => x.startsWith("/repositories/acme?")).length, 1, "repo list shared by both tabs");
   assert.equal(calls.filter((x) => x.includes("/api/pullrequests?")).length, 0);
 });
 
-test("project with few repos reviews every 60s; many repos fall back to 5 min", async () => {
+test("project with few repos scans every 60s; many repos fall back to 5 min", async () => {
   const run = async (n) => {
     const repos = { values: Array.from({ length: n }, (_, i) => ({ slug: `r${i}`, updated_on: "x" })) };
     const { f, calls } = fake({ "q=project": repos, "/pullrequests?": fx("repo-app-prs") }); // active repos are rescanned every cycle
@@ -260,10 +264,10 @@ test("one repo answering 404 or 403 counts as no PRs; panel stays ok and Mine re
   let r = await p.poll();
   assert.equal(r.state.status, "ok");
   assert.deepEqual(r.mine.map((x) => x.id), [7]);
-  assert.deepEqual(r.review.map((x) => x.id), [21]);
+  assert.deepEqual(r.project.map((x) => x.id), [24, 21, 22, 23]);
   const n = (s) => calls.filter((x) => x.includes(s)).length;
   assert.equal(n("/gone/pullrequests?"), 1);
-  c.t += 60_000; r = await p.poll(); // Mine due again, To review not (5 min)
+  c.t += 60_000; r = await p.poll(); // Mine due again, Project not (5 min)
   assert.equal(r.state.status, "ok");
   assert.equal(n("/pullrequests/%7B"), 2, "Mine refreshed");
   c.t += 300_000; r = await p.poll();
@@ -280,4 +284,26 @@ test("workspace and repo slugs compare case-insensitively", async () => {
   };
   assert.deepEqual(await run(""), [7]);
   assert.deepEqual(await run("ACME"), [7]);
+});
+
+test("Project build lookups are capped per scan: reviewing rows plus 10 others", async () => {
+  const repos = { values: Array.from({ length: 25 }, (_, i) => ({ slug: `r${i}`, updated_on: "x" })) };
+  const pr = (repo, id, reviewing) => ({
+    id, title: `PR ${id}`, state: "OPEN", created_on: `2026-11-2${id % 5}T06:00:00+00:00`, updated_on: "2026-11-25T09:00:00+00:00",
+    author: { uuid: "{22222222-bbbb-bbbb-bbbb-222222222222}", display_name: "anna" }, source: { branch: { name: "f" } },
+    destination: { repository: { full_name: `acme/${repo}` }, branch: { name: "main" } }, links: { html: { href: "https://bitbucket.org/x" } },
+    reviewers: reviewing ? [{ uuid: ME }] : [], participants: reviewing ? [{ role: "REVIEWER", approved: false, user: { uuid: ME } }] : [],
+  });
+  const over = { "/statuses": fx("statuses-ok"), "/pullrequests/%7B": { values: [] } };
+  repos.values.forEach((r, i) => { over[`/${r.slug}/pullrequests?`] = { values: Array.from({ length: 10 }, (_, k) => pr(r.slug, i * 10 + k + 1, i === 0 && k < 2)) }; });
+  const { f, calls } = fake({ "/repositories/acme?": repos, ...over });
+  const c = clock();
+  const r = await createPoller({ fetch: f, workspace: "acme", now: c.now }).poll();
+  const n = (s) => calls.filter((x) => x.includes(s)).length;
+  assert.equal(r.project.length, 250);
+  assert.equal(r.project.filter((x) => x.reviewing).length, 2);
+  assert.equal(n("/statuses"), 2 + PROJECT_BUILD_LOOKUPS_PER_SCAN);
+  assert.equal(r.project.filter((x) => x.build === "ok").length, 12);
+  assert.ok(r.project.filter((x) => x.reviewing).every((x) => x.build === "ok"));
+  assert.equal(n("/pullrequests?"), 25);
 });

@@ -1,15 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fixtureFrom, rowMeta, updatedText, buildColour, approvalsText, commentsText, stateView, openCommand } from "../../herdr-app/mods/bitbucket-prs/rows.js";
+import { fixtureFrom, rowMeta, branchText, EMPTY_TEXT, updatedText, buildColour, approvalsText, commentsText, stateView, openCommand } from "../../herdr-app/mods/bitbucket-prs/rows.js";
 
 test("fixtureFrom reads the line", () => {
   assert.equal(fixtureFrom("workspace=acme\nfixture=/tmp/f.json\r\n"), "/tmp/f.json");
   assert.equal(fixtureFrom("workspace=acme"), "");
 });
-test("rowMeta ages on from the poll", () => {
-  const r = { repo: "app", branch: "fix", ageMs: 3_600_000 };
-  assert.equal(rowMeta(r, 1000 + 3_600_000, 1000), "app · fix · 2h");
-  assert.equal(rowMeta({ repo: "app", branch: "", ageMs: 0 }, 5, 5), "app · 0m");
+test("rowMeta: author · #id · repo · age, ages on from the poll", () => {
+  const r = { author: "anna", id: 21, repo: "app", branch: "fix", dest: "main", ageMs: 3_600_000 };
+  assert.equal(rowMeta(r, 1000 + 3_600_000, 1000), "anna · #21 · app · 2h");
+  assert.equal(rowMeta({ id: 3, repo: "app", ageMs: 0 }, 5, 5), "#3 · app · 0m");
+});
+test("branchText and empty text", () => {
+  assert.equal(branchText({ branch: "fix", dest: "main" }), "fix → main");
+  assert.equal(branchText({ branch: "fix", dest: "" }), "fix");
+  assert.equal(branchText({ branch: "", dest: "" }), "");
+  assert.equal(EMPTY_TEXT, "No open pull requests in the project");
 });
 test("updatedText", () => {
   assert.equal(updatedText(0, 5), "not updated yet");

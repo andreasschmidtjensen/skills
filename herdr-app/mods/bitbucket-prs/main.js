@@ -1,5 +1,6 @@
 // Pull requests: the right panel listing open Bitbucket Cloud PRs, two tabs:
-// "Mine" (I wrote them) and "To review" (I'm a reviewer, not yet approved).
+// "Mine" (I wrote them) and "Project" (all open PRs of the project's repos, newest first;
+// rows where I'm a reviewer and have not approved carry a "review" marker; drafts a "Draft" tag).
 // Data and rate-limit logic are in bb.js (createPoller); requests go through bb-fetch.sh,
 // which holds the credentials (the panel never sees a token or email).
 // The poll loop runs only while the window is visible (window()?.visible); every 15 s it
@@ -7,14 +8,14 @@
 // Click a row to open the PR in the browser.
 //
 // Developer-only: a config line `fixture=<absolute path to a JSON file>` makes the panel read
-// {mine:[...],review:[...],state:{...}} from that file instead of polling (for `herdr-app check`
+// {mine:[...],project:[...],state:{...}} from that file instead of polling (for `herdr-app check`
 // and screenshots). setup.sh never writes it.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, exec, appHome, home, window, readTextFile } from "herdr";
 import { createPoller, interpretFetch } from "./bb.js";
-import { fixtureFrom, rowMeta, updatedText, buildColour, approvalsText, commentsText, stateView, openCommand } from "./rows.js";
+import { fixtureFrom, rowMeta, branchText, EMPTY_TEXT, updatedText, buildColour, approvalsText, commentsText, stateView, openCommand } from "./rows.js";
 
 const TICK_MS = 15_000;
 const SCRIPT = () => `${appHome()}/mods/bitbucket-prs/bb-fetch.sh`;
@@ -23,7 +24,7 @@ const CONFIG_SH = 'cat "${XDG_CONFIG_HOME:-$HOME/.config}/bitbucket-prs/config" 
 export default class PullRequests extends View {
   init(_props, cx) {
     this.tab = "mine";
-    this.data = { mine: [], review: [], state: { status: "ok", message: "" } };
+    this.data = { mine: [], project: [], state: { status: "ok", message: "" } };
     this.polledAt = 0;
     this.configured = true;
     this.poller = null;
@@ -77,8 +78,8 @@ export default class PullRequests extends View {
         const txt = await readTextFile(this.fixture).catch(() => null);
         let d = null;
         try { d = JSON.parse(txt ?? ""); } catch { d = null; }
-        this.data = d ? { mine: d.mine ?? [], review: d.review ?? [], state: d.state ?? { status: "ok", message: "" } }
-          : { mine: [], review: [], state: { status: "error", message: "Fixture file unreadable." } };
+        this.data = d ? { mine: d.mine ?? [], project: d.project ?? [], state: d.state ?? { status: "ok", message: "" } }
+          : { mine: [], project: [], state: { status: "error", message: "Fixture file unreadable." } };
         this.polledAt = Date.now();
       } else if (this.poller) {
         this.data = await this.poller.poll({ force });
@@ -87,6 +88,10 @@ export default class PullRequests extends View {
     } catch {
       this.data = { ...this.data, state: { status: "error", message: "Could not reach Bitbucket." } };
     } finally { this.busy = false; cx.notify(); }
+  }
+
+  tag(label, colour, t) {
+    return div().flex_none().px(4).rounded(3).border_1().border_color(colour).text_size(10).line_height("14px").text_color(colour).child(label);
   }
 
   open(url) {
@@ -119,8 +124,12 @@ export default class PullRequests extends View {
         .hover((s) => s.bg(t.hover)).tooltip(r.title)
         .on_click((_e, cx) => this.open(r.url))
         .child(v_flex().flex_1().min_w(0)
-          .child(div().truncate().text_size(13).line_height("18px").text_color(t.foreground).child(r.title))
-          .child(div().truncate().text_size(11).line_height("14px").text_color(t.dim).child(rowMeta(r, now, this.polledAt))))
+          .child(h_flex().gap(5).items_center().min_w(0)
+            .child(div().flex_1().min_w(0).truncate().text_size(13).line_height("18px").text_color(t.foreground).child(r.title))
+            .when(Boolean(r.draft), (el) => el.child(this.tag("Draft", t.muted, t)))
+            .when(Boolean(r.reviewing), (el) => el.child(this.tag("review", t.accent, t))))
+          .child(div().truncate().text_size(11).line_height("14px").text_color(t.dim).child(rowMeta(r, now, this.polledAt)))
+          .when(Boolean(branchText(r)), (el) => el.child(div().truncate().text_size(11).line_height("14px").text_color(t.dim).child(branchText(r)))))
         .when(Boolean(cm), (el) => el.child(div().flex_none().text_size(11).text_color(t.muted).child(cm)))
         .when(Boolean(ap), (el) => el.child(div().flex_none().text_size(11).text_color(t.ansi2).child(ap)))
         .when(Boolean(bc), (el) => el.child(div().size(7).flex_none().rounded(4).bg(t[bc])));
@@ -132,19 +141,19 @@ export default class PullRequests extends View {
         .child(div().text_size(12).line_height("17px").text_color(t.muted).child(sv.text))
       : v_flex().id("pr-scroll").flex_1().min_h(0).overflow_y_scrollbar().px(8).pb(8)
         .children(rows.map(row))
-        .when(!rows.length, (el) => el.child(div().px(8).py(6).text_size(12).text_color(t.dim).child("No open pull requests")));
+        .when(!rows.length, (el) => el.child(div().px(8).py(6).text_size(12).text_color(t.dim).child(this.tab === "project" ? EMPTY_TEXT : "No open pull requests")));
 
     return v_flex().size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border).text_color(t.foreground).text_size(13)
       .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border)
         .child(div().font_semibold().child("Pull requests"))
-        .child(div().px(5).py(1).rounded(4).border_1().border_color(t.border).text_size(10).text_color(t.muted).child(String(count("mine") + count("review"))))
+        .child(div().px(5).py(1).rounded(4).border_1().border_color(t.border).text_size(10).text_color(t.muted).child(String(count("mine") + count("project"))))
         .child(div().flex_1())
         .child(div().id("pr-refresh").size(22).flex_none().flex().items_center().justify_center().rounded(5).cursor_pointer()
           .hover((s) => s.bg(t.hover)).tooltip("Refresh")
           .on_click((_e, cx) => { cx.spawn(async (cx) => this.refresh(true, cx)); })
           .child(svg("mods/bitbucket-prs/refresh.svg").size(13).text_color(this.busy ? t.accent : t.muted))))
       .child(h_flex().flex_wrap().min_h(30).gap(2).px(8).pt(5).items_center()
-        .child(tab("mine", "Mine")).child(tab("review", "To review")))
+        .child(tab("mine", "Mine")).child(tab("project", "Project")))
       .child(body)
       .child(h_flex().h(24).flex_none().px(14).gap(8).items_center().border_t(1).border_color(t.border).text_size(11)
         .child(div().flex_none().text_color(t.dim).child(updatedText(this.polledAt, now)))

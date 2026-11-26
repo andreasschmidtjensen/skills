@@ -7,11 +7,18 @@ export function fixtureFrom(configText) {
   return m ? m[1].trim().replace(/\r$/, "") : "";
 }
 
-/** "repo · branch · age"; age counts on from the poll that made the row (polledAt, ms). */
+/** "author · #id · repo · age" (parts left out when empty); age counts on from the poll that made the row (polledAt, ms). */
 export function rowMeta(row, now, polledAt) {
   const age = (row.ageMs || 0) + Math.max(0, now - (polledAt || now));
-  return [row.repo, row.branch, formatAge(age)].filter(Boolean).join(" · ");
+  return [row.author, row.id != null ? `#${row.id}` : "", row.repo, formatAge(age)].filter(Boolean).join(" · ");
 }
+
+/** "source → destination" (just the source when there is no destination). */
+export function branchText(row) {
+  return [row.branch, row.dest].filter(Boolean).join(" → ");
+}
+
+export const EMPTY_TEXT = "No open pull requests in the project";
 
 /** "updated 12s ago" / "updated 3m ago" / "not updated yet". */
 export function updatedText(at, now) {

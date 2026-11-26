@@ -8,10 +8,13 @@ on the right below My To-do. Read-only: a click opens the PR in the browser.
 The panel shares the right column with the My To-do block, half the height each; the
 column keeps the to-do block's 368px width.
 
-- **Tabs**: **Mine** (open PRs you wrote) and **To review** (open PRs where you are a
-  reviewer), each with its count.
-- **Rows**: title, repository, source branch, build state, approvals, comment count
-  and age. Clicking a row opens the PR in the browser.
+- **Tabs**: **Mine** (open PRs you wrote) and **Project** (all open PRs in the
+  project's repositories, newest first, as on Bitbucket's project page), each with its count.
+  Without a project key, Project covers the whole workspace.
+- **Rows**: title, then "author · #id · repository · age" and "source → destination
+  branch", plus build state, approvals and comment count. Drafts carry a **Draft** tag;
+  PRs where you are a reviewer and have not approved carry a **review** marker.
+  Clicking a row opens the PR in the browser.
 - **Refresh button**, for a poll on demand.
 - **Setup message** instead of the list while the workspace, email or token is missing
   or rejected. It says what to do and never shows a secret.
@@ -22,8 +25,8 @@ column keeps the to-do block's 368px width.
 
 - Polls every 60 seconds while the window is visible, and on the refresh button.
   No toasts.
-- **Mine** refreshes every 60 s. **To review** refreshes every 5 min (60 s with a project of ≤5 repos).
-- PRs you already approved drop off **To review**.
+- **Mine** refreshes every 60 s. **Project** refreshes every 5 min (60 s with a project of ≤5 repos).
+- The **review** marker goes away once you approve the PR.
 - Open PRs only, one workspace. With a **project key** in the config, both tabs only
   cover that Bitbucket project's repositories, which also lowers the request cost.
   Without one, the whole workspace.
@@ -73,8 +76,9 @@ column keeps the to-do block's 368px width.
 - **Token scopes:** create the API token with read access to pull requests and
   repositories (and to your account: both tabs need it). A token that is too
   narrow shows as a rejected-token message in the panel.
-- **To review:** Bitbucket Cloud has no single call for "PRs where I am a reviewer"
-  across a workspace, so that tab is found another way and may lag Mine slightly.
+- **Limits:** the Project tab shows at most 50 open PRs per repository (one page per repo). Build state on Project rows is looked up for the PRs you are asked to review plus up to 10 others per scan, so other rows may show no build dot for a few minutes.
+- **Project:** Bitbucket Cloud has no single call for all open PRs of a project, so the
+  panel scans the repositories one by one; that tab may lag Mine slightly.
 - The workspace name, email and token are configuration on your computer; none of them
   is committed anywhere.
 - The installer rewrites the layout JSON through `jq`, so its whitespace may change
@@ -85,7 +89,7 @@ column keeps the to-do block's 368px width.
 - `install-bitbucket.sh` docks the panel below My To-do, and running it again changes nothing.
 - With a project key set, both tabs show only that project's repositories.
 - With the workspace and token set up, Mine lists your open PRs with the fields above.
-- To review lists the open PRs you are asked to review.
+- Project lists all open PRs (drafts included) with author and branches, and marks those you are asked to review.
 - A click on a row opens the PR in the browser.
 - Without a config or token, the panel shows the setup message; no secret appears.
 - A 429 shows the backoff notice and pauses polling.
