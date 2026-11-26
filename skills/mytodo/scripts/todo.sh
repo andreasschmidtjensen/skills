@@ -52,6 +52,10 @@ when you leave follow-up work undone. Keep items short, one line each.
 - Before adding, run `mytodo` and look for a main item the new one belongs to (e.g.
   "HAProxy"). If there is one, add it as a sub-to-do: `mytodo add --under <n> <text>`
   (n is a path like `1` or `1.2`, 3 levels max). Plain `mytodo add` makes a top-level item.
+- When a request has more than one subtask, never add just the separate tasks: first add
+  one main to-do for the request as a whole, then one sub-to-do under it
+  (`mytodo add --under <n> <text>`) for each task. A request with a single task stays a
+  single item.
 - There is no move command: to move an item, `mytodo rm` it and re-add it with `--under`
   (keep its ticked state with `mytodo done`).
 - Run `mytodo help` when unsure of the syntax instead of guessing.
