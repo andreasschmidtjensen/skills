@@ -443,6 +443,7 @@ export default class Todos extends View {
     this.childInput.on("submit", (_e, cx) => this.addSub(cx));
     this.childInput.on("blur", (_e, cx) => { if (this.childFor && !this.childInput.value().trim()) { this.childFor = null; cx.notify(); } });
     this.folded = new Set();
+    this.open = new Set(); // to-dos whose text is shown whole (a click on it)
     this.delItem = null; // the × armed: its key, and the text it was armed on (delText)
     this.delText = null;
     cx.spawn(async (cx) => {
@@ -893,7 +894,7 @@ export default class Todos extends View {
     };
 
     // A to-do, as the sidebar's agent rows: its circle, the text on one line
-    // (all of it in a tooltip, or double-click to edit), and on the right when it's
+    // (all of it in a tooltip, or click to show it whole; double-click to edit), and on the right when it's
     // due or was done; on hover, the agent and delete buttons.
     const row = (x) => {
       const key = `${x.slug}:${x.i}`, editing = this.editing?.slug === x.slug && this.editing.i === x.i, c = this.color(x.folder, t);
@@ -925,8 +926,8 @@ export default class Todos extends View {
         .child(editing
           ? Input.new(this.editInput).flex_1().h(24).px(6).rounded(5).border_1().border_color(t.accent).bg(t.background).text_size(13).text_color(t.foreground)
           : div().id(`text-${key}`).flex_1().min_w(0).text_size(13).line_height("18px").text_color(x.done ? t.dim : t.foreground).when(x.done, (el) => el.line_through())
-            .truncate().tooltip(x.text)
-            .on_click((e, cx) => { if (e.click_count === 2 && !multi(e)) { this.editing = { slug: x.slug, i: x.i }; this.editInput.set_value(x.text + (x.due ? ` @${fmtDate(new Date(`${x.due.split(" ")[0]}T00:00:00`))}${x.due.includes(" ") ? ` ${fmtTime(x.due.split(" ")[1])}` : ""}` : "")); this.editInput.focus(); cx.notify(); } })
+            .when(!this.open.has(key), (el) => el.truncate().tooltip(x.text)).when(this.open.has(key), (el) => el.whitespace_normal().py(5))
+            .on_click((e, cx) => { if (e.click_count === 1 && !multi(e)) { this.open.has(key) ? this.open.delete(key) : this.open.add(key); cx.notify(); } if (e.click_count === 2 && !multi(e)) { this.editing = { slug: x.slug, i: x.i }; this.editInput.set_value(x.text + (x.due ? ` @${fmtDate(new Date(`${x.due.split(" ")[0]}T00:00:00`))}${x.due.includes(" ") ? ` ${fmtTime(x.due.split(" ")[1])}` : ""}` : "")); this.editInput.focus(); cx.notify(); } })
             .child(x.text))
         .when(x.kids && !editing, (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(`${x.cnt.done}/${x.cnt.total}`)))
         .when(Boolean(meta) && !editing && !(hovered && !x.done), (el) => el.child(div().flex_none().text_size(11).text_color(!x.done && overdue(x.due) ? t.ansi1 : t.dim).child(meta)))

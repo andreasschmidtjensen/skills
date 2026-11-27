@@ -29,7 +29,8 @@ a 10px radius. Colours are theme names.
   - On the right, in 11px: the due time (`ansi1` when overdue) or the done
     time, and in All the project's name in its colour, flush right.
   - On hover: the row keeps its height and shows a bot button and a ×; the
-    full text is in a tooltip.
+    full text is in a tooltip. Clicking the text shows it whole (click again to
+    fold it); double-click edits.
 - **Done**: a foldable section (chevron, "Done", count, and Clear on the right),
   then the latest five done to-dos and "Show 10 more".
 - **Sub-to-dos**: a row's + adds a child under it (3 levels at most). A parent
