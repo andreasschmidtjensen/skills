@@ -893,7 +893,7 @@ export default class Todos extends View {
     };
 
     // A to-do, as the sidebar's agent rows: its circle, the text on one line
-    // (all of it on hover, or double-click to edit), and on the right when it's
+    // (all of it in a tooltip, or double-click to edit), and on the right when it's
     // due or was done; on hover, the agent and delete buttons.
     const row = (x) => {
       const key = `${x.slug}:${x.i}`, editing = this.editing?.slug === x.slug && this.editing.i === x.i, c = this.color(x.folder, t);
@@ -925,7 +925,7 @@ export default class Todos extends View {
         .child(editing
           ? Input.new(this.editInput).flex_1().h(24).px(6).rounded(5).border_1().border_color(t.accent).bg(t.background).text_size(13).text_color(t.foreground)
           : div().id(`text-${key}`).flex_1().min_w(0).text_size(13).line_height("18px").text_color(x.done ? t.dim : t.foreground).when(x.done, (el) => el.line_through())
-            .when(!hovered, (el) => el.truncate()).when(hovered, (el) => el.whitespace_normal().py(5))
+            .truncate().tooltip(x.text)
             .on_click((e, cx) => { if (e.click_count === 2 && !multi(e)) { this.editing = { slug: x.slug, i: x.i }; this.editInput.set_value(x.text + (x.due ? ` @${fmtDate(new Date(`${x.due.split(" ")[0]}T00:00:00`))}${x.due.includes(" ") ? ` ${fmtTime(x.due.split(" ")[1])}` : ""}` : "")); this.editInput.focus(); cx.notify(); } })
             .child(x.text))
         .when(x.kids && !editing, (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(`${x.cnt.done}/${x.cnt.total}`)))
@@ -1108,7 +1108,7 @@ export default class Todos extends View {
               .flex().items_center().justify_center().hover((x) => x.border_color(this.color(focusFolder, t)))
               .child(svg("mods/workspace-chrome/plus.svg").size(9).text_color(t.muted))
               .on_click((_e, cx) => this.take(focusFolder, [text], cx)))
-            .child(div().flex_1().min_w(0).text_size(13).line_height("18px").text_color(t.muted).when(this.hover !== `file:${i}`, (el) => el.truncate()).when(this.hover === `file:${i}`, (el) => el.whitespace_normal().py(5)).child(text))
+            .child(div().id(`ftext-${i}`).flex_1().min_w(0).text_size(13).line_height("18px").text_color(t.muted).truncate().tooltip(text).child(text))
             .when((this.hover === `file:${i}` || this.startFor === `file:${i}`) && this.agentChoices.length > 0, (el) => el.child(div().id(`fstart-${i}`).size(18).flex_none().flex().items_center().justify_center().rounded(4).cursor_pointer()
               .when(this.startFor === `file:${i}`, (el) => el.bg(t.selected))
               .hover((x) => x.bg(t.raised)).on_click((_e, cx) => { this.pickOpen = false; this.startFor = this.startFor === `file:${i}` ? null : `file:${i}`; cx.notify(); })
