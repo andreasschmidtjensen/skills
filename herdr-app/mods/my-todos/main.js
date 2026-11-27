@@ -899,8 +899,13 @@ export default class Todos extends View {
     const row = (x) => {
       const key = `${x.slug}:${x.i}`, editing = this.editing?.slug === x.slug && this.editing.i === x.i, c = this.color(x.folder, t);
       const on = this.sel.get(key) === x.text, hovered = this.hover === key;
+      const isOpen = this.open.has(key);
       const meta = x.done ? (x.doneOn ? doneWords(x.doneOn) : "") : x.due ? dueWords(x.due) : "";
       const armed = this.delItem === key && this.delText === x.text, n = x.end - x.i;
+      // A row shown whole keeps its right side as it is on hover (the buttons' room is
+      // reserved, empty until hovered), so hovering never re-wraps it taller.
+      const show = hovered || isOpen, ghost = isOpen && !hovered && !armed && this.startFor !== key;
+      const slot = (el) => ghost ? div().size(20).flex_none() : el;
       return h_flex().id(`todo-${key}`).min_h(30).px(8).gap(8).items_center().rounded(8).ml(14 * x.depth)
         .when(on, (el) => el.bg(t.accent + "38")).hover((s) => s.bg(on ? t.accent + "38" : t.hover))
         .on_click((e, cx) => { if (multi(e) && !editing && this.filter) this.pick(x, e, cx); })
@@ -930,20 +935,20 @@ export default class Todos extends View {
             .on_click((e, cx) => { if (e.click_count === 1 && !multi(e)) { this.open.has(key) ? this.open.delete(key) : this.open.add(key); cx.notify(); } if (e.click_count === 2 && !multi(e)) { this.editing = { slug: x.slug, i: x.i }; this.editInput.set_value(x.text + (x.due ? ` @${fmtDate(new Date(`${x.due.split(" ")[0]}T00:00:00`))}${x.due.includes(" ") ? ` ${fmtTime(x.due.split(" ")[1])}` : ""}` : "")); this.editInput.focus(); cx.notify(); } })
             .child(x.text))
         .when(x.kids && !editing, (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(`${x.cnt.done}/${x.cnt.total}`)))
-        .when(Boolean(meta) && !editing && !(hovered && !x.done), (el) => el.child(div().flex_none().text_size(11).text_color(!x.done && overdue(x.due) ? t.ansi1 : t.dim).child(meta)))
+        .when(Boolean(meta) && !editing && !(show && !x.done), (el) => el.child(div().flex_none().text_size(11).text_color(!x.done && overdue(x.due) ? t.ansi1 : t.dim).child(meta)))
         // In All, its project's name, in its colour, last so every row's lines up
         // on the right (the tabs above filter by it).
-        .when(!this.filter && !editing && !(hovered && !x.done), (el) => el.child(div().flex_none().max_w(110).truncate().text_right().text_size(11).text_color(c).child(this.name(x.folder))))
-        .when((hovered || this.startFor === key) && !editing && !x.done && this.agentChoices.length > 0, (el) => el.child(div().id(`start-${key}`).size(20).flex_none().flex().items_center().justify_center().rounded(5).cursor_pointer()
+        .when(!this.filter && !editing && !(show && !x.done), (el) => el.child(div().flex_none().max_w(110).truncate().text_right().text_size(11).text_color(c).child(this.name(x.folder))))
+        .when((show || this.startFor === key) && !editing && !x.done && this.agentChoices.length > 0, (el) => el.child(slot(div().id(`start-${key}`).size(20).flex_none().flex().items_center().justify_center().rounded(5).cursor_pointer()
           .when(this.startFor === key, (el) => el.bg(t.selected))
           .hover((s) => s.bg(t.raised)).on_click((_e, cx) => { this.pickOpen = false; this.startFor = this.startFor === key ? null : key; cx.notify(); })
-          .child(svg("mods/my-todos/bot.svg").size(12).text_color(t.muted))))
-        .when(hovered && !editing && !x.done && canAddChild(this.lists[x.slug]?.items ?? [], x.i), (el) => el.child(div().id(`sub-${key}`).size(20).flex_none().flex().items_center().justify_center().rounded(5).cursor_pointer()
+          .child(svg("mods/my-todos/bot.svg").size(12).text_color(t.muted)))))
+        .when(show && !editing && !x.done && canAddChild(this.lists[x.slug]?.items ?? [], x.i), (el) => el.child(slot(div().id(`sub-${key}`).size(20).flex_none().flex().items_center().justify_center().rounded(5).cursor_pointer()
           .when(this.childFor === key, (el) => el.bg(t.selected)).hover((s) => s.bg(t.raised)).tooltip("Add a sub-to-do")
           .on_click((_e, cx) => { this.pickOpen = false; this.childFor = this.childFor === key ? null : key; this.childText = x.text; if (this.childFor) { this.childInput.set_value(""); this.childInput.focus(); } cx.notify(); })
-          .child(svg("mods/workspace-chrome/plus.svg").size(11).text_color(t.muted))))
+          .child(svg("mods/workspace-chrome/plus.svg").size(11).text_color(t.muted)))))
         // × deletes it; a parent with sub-items (its subtree goes too) asks twice.
-        .when((hovered || armed) && !editing, (el) => el.child(div().id(`del-${key}`).h(20).min_w(20).px(armed ? 5 : 0).flex_none().flex().items_center().justify_center().rounded(5).cursor_pointer()
+        .when((show || armed) && !editing, (el) => el.child(slot(div().id(`del-${key}`).h(20).min_w(20).px(armed ? 5 : 0).flex_none().flex().items_center().justify_center().rounded(5).cursor_pointer()
           .hover((s) => s.bg(t.raised)).on_click((_e, cx) => {
             if (x.kids && !armed) { this.delItem = key; this.delText = x.text; cx.spawn(async (cx) => { await cx.sleep(3000); if (this.delItem === key) { this.delItem = null; cx.notify(); } }); return cx.notify(); }
             const was = this.lists[x.slug]?.items ?? [];
@@ -951,7 +956,7 @@ export default class Todos extends View {
             this.delItem = null;
             this.change(x.slug, (items) => removeSubtrees(items, [x.i]), cx);
           })
-          .child(armed ? div().text_size(11).text_color(t.ansi1).child(`Delete ${n}?`) : svg("mods/workspace-chrome/x.svg").size(11).text_color(t.muted))));
+          .child(armed ? div().text_size(11).text_color(t.ansi1).child(`Delete ${n}?`) : svg("mods/workspace-chrome/x.svg").size(11).text_color(t.muted)))));
     };
     // A section, as the sidebar's Parked: a chevron that folds it, its name and
     // count, and an action on the right.
